@@ -3,7 +3,7 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import folium
 from streamlit_folium import st_folium
-from geopy.geocoders import Nominatim
+from geopy.geocoders import ArcGIS
 
 st.set_page_config(page_title="Syd/Melb 2026", page_icon="🦘", layout="wide")
 
@@ -19,26 +19,23 @@ url = "https://docs.google.com/spreadsheets/d/17vTlewfPPS2lZainhCJgEEOkp5tJ3LDNq
 
 st.title("🇦🇺 Australia Trip Hub 2026")
 
-# --- THE SMART MAP TRANSLATOR ---
+# --- THE SMART MAP TRANSLATOR (ArcGIS Version) ---
 @st.cache_data(show_spinner=False)
 def get_coordinates(location_name):
     try:
-        # I changed the user_agent slightly to bypass potential blocks
-        geolocator = Nominatim(user_agent="my_aus_trip_app_2026")
+        # We swapped Nominatim for ArcGIS!
+        geolocator = ArcGIS()
         
-        # We add timeout=10 to force the Robot to wait 10 seconds for an answer before giving up
+        # Ask it to find the location in Australia
         location = geolocator.geocode(f"{location_name}, Australia", timeout=10)
         
         if location:
             return [location.latitude, location.longitude]
         else:
-            # If it connects but genuinely can't find it
-            st.warning(f"Map server couldn't find a place called '{location_name}'.")
             return None
             
     except Exception as e:
-        # If the map server crashes, blocks us, or times out, we will see the exact error!
-        st.error(f"Translator crashed on '{location_name}'! The error: {e}")
+        st.error(f"ArcGIS crashed on '{location_name}'! The error: {e}")
         return None
 
 # --- 2. CREATE THE TABS ---
