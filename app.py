@@ -20,6 +20,21 @@ url = "https://docs.google.com/spreadsheets/d/17vTlewfPPS2lZainhCJgEEOkp5tJ3LDNq
 
 st.title("🇦🇺 Australia Trip Hub 2026")
 
+# --- THE SMART MAP TRANSLATOR ---
+# We use st.cache_data so the Robot memorizes the locations and doesn't slow down your app!
+@st.cache_data(show_spinner=False)
+def get_coordinates(location_name):
+    try:
+        # Create the translator tool
+        geolocator = Nominatim(user_agent="aus_trip_2026")
+        # Ask it to find the location in Australia
+        location = geolocator.geocode(f"{location_name}, Australia")
+        if location:
+            return [location.latitude, location.longitude]
+        return None
+    except:
+        return None
+
 # --- 2. CREATE THE TABS ---
 tab1, tab2, tab3 = st.tabs(["🗓️ Planner & Map", "🎯 Missions", "💰 Expenses"])
 
@@ -42,11 +57,31 @@ with tab1:
 
         st.divider()
         st.subheader("📍 Location Map")
-        m = folium.Map(location=[-33.8688, 151.2093], zoom_start=12)
-        st_folium(m, width="stretch", height=400)
         
-    except Exception as e:
-        st.error(f"Robot can't read the 'Planner' tab. The real error is: {e}")
+        # Center map on Sydney by default
+        m = folium.Map(location=[-33.8688, 151.2093], zoom_start=11)
+        
+        # Look at the 'Location' and 'Activity' columns in your planner
+        if 'Location' in edited_plan.columns and 'Activity' in edited_plan.columns:
+            # Loop through every row you typed
+            for index, row in edited_plan.iterrows():
+                loc_name = str(row['Location']).strip()
+                act_name = str(row['Activity']).strip()
+                
+                # If the location isn't blank, translate it to a pin!
+                if loc_name != "" and loc_name != "nan":
+                    coords = get_coordinates(loc_name)
+                    
+                    if coords:
+                        # Drop a pin with the Activity name as the popup
+                        folium.Marker(
+                            coords, 
+                            popup=f"<b>{act_name}</b><br>{loc_name}", 
+                            tooltip=act_name,
+                            icon=folium.Icon(color="red", icon="info-sign")
+                        ).add_to(m)
+
+        st_folium(m, width="stretch", height=400)
 
 # --- TAB 2: MISSIONS ---
 with tab2:
