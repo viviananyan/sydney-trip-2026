@@ -54,28 +54,34 @@ with tab1:
         st.divider()
         st.subheader("📍 Location Map")
         
+        # --- THE X-RAY MACHINE ---
+        st.write("🕵️ **Robot's Thought Process:**")
+        
         # Center map on Sydney by default
         m = folium.Map(location=[-33.8688, 151.2093], zoom_start=11)
         
-        # Look at the 'Location' and 'Activity' columns in your planner
         if 'Location' in edited_plan.columns and 'Activity' in edited_plan.columns:
             for index, row in edited_plan.iterrows():
-                loc_name = str(row['Location']).strip()
-                act_name = str(row['Activity']).strip()
+                loc_name = str(row.get('Location', '')).strip()
+                act_name = str(row.get('Activity', '')).strip()
                 
-                # If the location isn't blank, translate it to a pin!
-                if loc_name != "" and loc_name != "nan":
+                # If the location isn't blank, translate it!
+                if loc_name != "" and loc_name.lower() != "nan":
                     coords = get_coordinates(loc_name)
                     
-                    if coords:
+                    # THIS PRINTS THE ROBOT'S THOUGHTS ON THE SCREEN:
+                    st.write(f"- Searching for '{loc_name}'... Coordinates found: `{coords}`")
+                    
+                    if coords and isinstance(coords, list):
                         folium.Marker(
                             coords, 
                             popup=f"<b>{act_name}</b><br>{loc_name}", 
-                            tooltip=act_name,
+                            tooltip=act_name if act_name else loc_name,
                             icon=folium.Icon(color="red", icon="info-sign")
                         ).add_to(m)
 
-        st_folium(m, width="stretch", height=400)
+        # Added a 'key' here to force the map to refresh properly
+        st_folium(m, width="stretch", height=400, key="trip_map")
         
     except Exception as e:
         st.error(f"Robot can't read the 'Planner' tab. The real error is: {e}")
