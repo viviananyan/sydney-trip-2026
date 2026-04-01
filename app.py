@@ -1,61 +1,56 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
+import pandas as pd
+import folium
+from streamlit_folium import st_folium
 
-st.set_page_config(page_title="Syd/Melb 2026", page_icon="🦘")
+st.set_page_config(page_title="Syd/Melb 2026", page_icon="🦘", layout="wide")
 
 st.title("🇦🇺 Our Shared Travel Hub")
 
-# 1. Connect to Google Sheets (This looks at your SECRETS automatically)
-conn = st.connection("gsheets", type=GSheetsConnection)
-
-# 2. Define the URL of your Google Sheet
-# (Make sure this is the URL of the sheet you SHARED with the robot email!)
-url = "https://docs.google.com/spreadsheets/d/17vTlewfPPS2lZainhCJgEEOkp5tJ3LDNqX8myrfJ7uQ/edit?pli=1&gid=0#gid=0"
-
+# --- 1. CONNECTION SETUP ---
 try:
-    # 3. Read the data
+    secret_info = st.secrets["connections"]["gsheets"]
+    conn = st.connection("gsheets", type=GSheetsConnection, **secret_info)
+except Exception as e:
+    st.error("Secrets not found!")
+    st.stop()
+
+url = "PASTE_YOUR_GOOGLE_SHEET_URL_HERE"
+
+# --- 2. DATA LOAD & EDITOR ---
+try:
     df = conn.read(spreadsheet=url, worksheet="Planner")
-
-    # 4. Show the interactive table
+    
     st.subheader("🗓️ Trip Planner")
-    edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True)
+    edited_df = st.data_editor(df, num_rows="dynamic", width="stretch")
 
-    # 5. Save functionality
-    import folium
-from streamlit_folium import st_folium
-
-st.divider() # Adds a nice visual line
-st.subheader("📍 Our Sydney/Melbourne Map")
-
-# Create a map centered on Australia
-m = folium.Map(location=[-33.8688, 151.2093], zoom_start=12)
-
-# This loop looks at your table and adds pins
-for index, row in df.iterrows():
-    # If you have a column named 'Location', it adds a pin
-    if 'Location' in df.columns and pd.notnull(row['Location']):
-        # For now, let's just put a pin in Sydney as a test
-        folium.Marker(
-            [-33.86, 151.20], 
-            popup=row['Activity'], 
-            tooltip=row['Activity']
-        ).add_to(m)
-
-st_folium(m, width="stretch", height=400)
     if st.button("Save Changes"):
         conn.update(spreadsheet=url, data=edited_df, worksheet="Planner")
-        st.success("Saved! 🚀")
+        
+        # Phase 5: The "Boom" Logic
+        if "Zoo" in edited_df['Activity'].values:
+            st.info("I've noted the Zoo! Remember to check the Mission list for tickets. 🎟️")
+            
+        st.success("Saved to Google Sheets! 🚀")
         st.balloons()
-    if st.button("Save Changes"):
-    conn.update(spreadsheet=url, data=edited_df, worksheet="Planner")
-    
-    # NEW: Check if "Zoo" was added, and if so, add a Mission!
-    if "Zoo" in edited_df['Activity'].values:
-        # Here we would write code to update the 'Missions' tab automatically
-        st.info("I noticed you added the Zoo! I've added 'Buy Zoo Tickets' to your Mission List. 🎟️")
-    
-    st.success("Saved! 🚀")
 
+# --- 3. THE MAP SECTION ---
+    st.divider()
+    st.subheader("📍 Our Sydney/Melbourne Map")
+
+    # Center on Sydney by default
+    m = folium.Map(location=[-33.8688, 151.2093], zoom_start=12)
+
+    # Simple test pin
+    folium.Marker(
+        [-33.8688, 151.2093], 
+        popup="Sydney Central", 
+        tooltip="We start here!"
+    ).add_to(m)
+
+    st_folium(m, width="stretch", height=400)
+
+# THIS IS THE PART THAT WAS MISSING:
 except Exception as e:
-    st.error("The app is connected to the 'Key', but it can't find the Sheet.")
-    st.write(f"Error Details: {e}")
+    st.error(f"Something went wrong: {e}")
