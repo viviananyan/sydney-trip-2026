@@ -10,7 +10,7 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 # 2. Define the URL of your Google Sheet
 # (Make sure this is the URL of the sheet you SHARED with the robot email!)
-url = "PASTE_YOUR_GOOGLE_SHEET_URL_HERE"
+url = "https://docs.google.com/spreadsheets/d/17vTlewfPPS2lZainhCJgEEOkp5tJ3LDNqX8myrfJ7uQ/edit?pli=1&gid=0#gid=0"
 
 try:
     # 3. Read the data
