@@ -21,6 +21,27 @@ try:
     edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True)
 
     # 5. Save functionality
+    import folium
+from streamlit_folium import st_folium
+
+st.divider() # Adds a nice visual line
+st.subheader("📍 Our Sydney/Melbourne Map")
+
+# Create a map centered on Australia
+m = folium.Map(location=[-33.8688, 151.2093], zoom_start=12)
+
+# This loop looks at your table and adds pins
+for index, row in df.iterrows():
+    # If you have a column named 'Location', it adds a pin
+    if 'Location' in df.columns and pd.notnull(row['Location']):
+        # For now, let's just put a pin in Sydney as a test
+        folium.Marker(
+            [-33.86, 151.20], 
+            popup=row['Activity'], 
+            tooltip=row['Activity']
+        ).add_to(m)
+
+st_folium(m, width="stretch", height=400)
     if st.button("Save Changes"):
         conn.update(spreadsheet=url, data=edited_df, worksheet="Planner")
         st.success("Saved! 🚀")
