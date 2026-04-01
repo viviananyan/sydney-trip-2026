@@ -66,22 +66,38 @@ with tab3:
     try:
         df_exp = conn.read(spreadsheet=url, worksheet="Expenses")
         
-        # 🧹 THE CLEANING STATION
+        # 1. CLEANING: Remove completely empty rows
         df_exp = df_exp.dropna(how="all")
-        # We fill empty text columns with blanks, but leave numbers alone if possible
-        df_exp = df_exp.fillna("")
         
-        edited_exp = st.data_editor(df_exp, num_rows="dynamic", width="stretch", key="exp_editor")
+        # 2. SEPARATE THE NUMBERS FROM THE TEXT
+        if 'Cost' in df_exp.columns:
+            # Force the 'Cost' column to be a strict math number
+            df_exp['Cost'] = pd.to_numeric(df_exp['Cost'], errors='coerce')
+            
+        # Force all OTHER columns to be clean text
+        for col in df_exp.columns:
+            if col != 'Cost':
+                df_exp[col] = df_exp[col].fillna("").astype(str)
+        
+        # 3. THE MAGIC EDITOR (Now with strict column rules!)
+        edited_exp = st.data_editor(
+            df_exp, 
+            num_rows="dynamic", 
+            width="stretch", 
+            key="exp_editor",
+            column_config={
+                # This tells Streamlit: "Treat this as a number and show a dollar sign!"
+                "Cost": st.column_config.NumberColumn("Cost", format="$%.2f", min_value=0.0)
+            }
+        )
         
         if st.button("Save Expenses"):
             conn.update(spreadsheet=url, data=edited_exp, worksheet="Expenses")
             st.success("Expenses Saved!")
             
-        # Quick Math: Total Cost (We convert it to numeric just in case someone typed a weird symbol)
-        if not df_exp.empty and 'Cost' in df_exp.columns:
-            # Force the cost column to be math-friendly
-            df_exp['Cost'] = pd.to_numeric(df_exp['Cost'], errors='coerce').fillna(0)
-            total = df_exp['Cost'].sum()
+        # Quick Math: Calculate from the newly edited data
+        if not df_exp.empty and 'Cost' in edited_exp.columns:
+            total = edited_exp['Cost'].sum()
             st.metric("Total Trip Spend", f"${total:.2f} AUD")
             st.write(f"Each person owes: **${total/3:.2f}**")
             
