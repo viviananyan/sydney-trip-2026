@@ -8,12 +8,10 @@ st.set_page_config(page_title="Syd/Melb 2026", page_icon="🦘", layout="wide")
 
 # --- 1. CONNECTION SETUP ---
 try:
-    secret_info = st.secrets["connections"]["gsheets"]
-    conn = st.connection("gsheets", type=GSheetsConnection, **secret_info)
+    # Look how clean this is! Streamlit will automatically check your Secrets vault now.
+    conn = st.connection("gsheets", type=GSheetsConnection)
 except Exception as e:
-    st.error(f"Connection Secrets missing! The real error is: {e}")
-    # This next line will print out the names of the "folders" Streamlit CAN see
-    st.write("Here is what the Robot sees in your Secrets vault:", dict(st.secrets))
+    st.error(f"Connection failed! The real error is: {e}")
     st.stop()
 
 # DON'T FORGET TO PASTE YOUR URL HERE AGAIN!
