@@ -23,13 +23,22 @@ st.title("🇦🇺 Australia Trip Hub 2026")
 @st.cache_data(show_spinner=False)
 def get_coordinates(location_name):
     try:
-        geolocator = Nominatim(user_agent="aus_trip_2026")
-        # Ask it to find the location in Australia
-        location = geolocator.geocode(f"{location_name}, Australia")
+        # I changed the user_agent slightly to bypass potential blocks
+        geolocator = Nominatim(user_agent="my_aus_trip_app_2026")
+        
+        # We add timeout=10 to force the Robot to wait 10 seconds for an answer before giving up
+        location = geolocator.geocode(f"{location_name}, Australia", timeout=10)
+        
         if location:
             return [location.latitude, location.longitude]
-        return None
-    except:
+        else:
+            # If it connects but genuinely can't find it
+            st.warning(f"Map server couldn't find a place called '{location_name}'.")
+            return None
+            
+    except Exception as e:
+        # If the map server crashes, blocks us, or times out, we will see the exact error!
+        st.error(f"Translator crashed on '{location_name}'! The error: {e}")
         return None
 
 # --- 2. CREATE THE TABS ---
