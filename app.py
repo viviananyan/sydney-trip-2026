@@ -11,7 +11,9 @@ try:
     secret_info = st.secrets["connections"]["gsheets"]
     conn = st.connection("gsheets", type=GSheetsConnection, **secret_info)
 except Exception as e:
-    st.error("Connection Secrets missing!")
+    st.error(f"Connection Secrets missing! The real error is: {e}")
+    # This next line will print out the names of the "folders" Streamlit CAN see
+    st.write("Here is what the Robot sees in your Secrets vault:", dict(st.secrets))
     st.stop()
 
 # DON'T FORGET TO PASTE YOUR URL HERE AGAIN!
