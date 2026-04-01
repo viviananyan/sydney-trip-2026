@@ -6,51 +6,69 @@ from streamlit_folium import st_folium
 
 st.set_page_config(page_title="Syd/Melb 2026", page_icon="🦘", layout="wide")
 
-st.title("🇦🇺 Our Shared Travel Hub")
-
-# --- 1. CONNECTION SETUP ---
+# 1. SETUP CONNECTION
 try:
     secret_info = st.secrets["connections"]["gsheets"]
     conn = st.connection("gsheets", type=GSheetsConnection, **secret_info)
-except Exception as e:
-    st.error("Secrets not found!")
+except:
+    st.error("Connection Secrets missing!")
     st.stop()
 
-url = "PASTE_YOUR_GOOGLE_SHEET_URL_HERE"
+url = "https://docs.google.com/spreadsheets/d/17vTlewfPPS2lZainhCJgEEOkp5tJ3LDNqX8myrfJ7uQ/edit?pli=1&gid=0#gid=0"
 
-# --- 2. DATA LOAD & EDITOR ---
-try:
-    df = conn.read(spreadsheet=url, worksheet="Planner")
-    
-    st.subheader("🗓️ Trip Planner")
-    edited_df = st.data_editor(df, num_rows="dynamic", width="stretch")
+st.title("🇦🇺 Australia Trip Hub 2026")
 
-    if st.button("Save Changes"):
-        conn.update(spreadsheet=url, data=edited_df, worksheet="Planner")
+# 2. CREATE THE TABS
+# This creates the navigation bar at the top
+tab1, tab2, tab3 = st.tabs(["🗓️ Planner & Map", "🎯 Missions", "💰 Expenses"])
+
+# --- TAB 1: PLANNER & MAP ---
+with tab1:
+    st.subheader("Trip Itinerary")
+    try:
+        df_plan = conn.read(spreadsheet=url, worksheet="Planner")
+        edited_plan = st.data_editor(df_plan, num_rows="dynamic", width="stretch", key="plan_editor")
         
-        # Phase 5: The "Boom" Logic
-        if "Zoo" in edited_df['Activity'].values:
-            st.info("I've noted the Zoo! Remember to check the Mission list for tickets. 🎟️")
+        if st.button("Save Plan"):
+            conn.update(spreadsheet=url, data=edited_plan, worksheet="Planner")
+            st.success("Plan Saved!")
+
+        st.divider()
+        st.subheader("📍 Location Map")
+        m = folium.Map(location=[-33.8688, 151.2093], zoom_start=12)
+        # (Map pins logic would go here)
+        st_folium(m, width="stretch", height=400)
+    except:
+        st.warning("Could not find 'Planner' worksheet. Check your Google Sheet tab name!")
+
+# --- TAB 2: MISSIONS ---
+with tab2:
+    st.subheader("Trip Missions (To-Do)")
+    try:
+        df_miss = conn.read(spreadsheet=url, worksheet="Missions")
+        edited_miss = st.data_editor(df_miss, num_rows="dynamic", width="stretch", key="miss_editor")
+        
+        if st.button("Save Missions"):
+            conn.update(spreadsheet=url, data=edited_miss, worksheet="Missions")
+            st.success("Missions Updated!")
+    except:
+        st.info("Add a tab named 'Missions' to your Google Sheet to see this work!")
+
+# --- TAB 3: EXPENSES ---
+with tab3:
+    st.subheader("Shared Expenses")
+    try:
+        df_exp = conn.read(spreadsheet=url, worksheet="Expenses")
+        edited_exp = st.data_editor(df_exp, num_rows="dynamic", width="stretch", key="exp_editor")
+        
+        if st.button("Save Expenses"):
+            conn.update(spreadsheet=url, data=edited_exp, worksheet="Expenses")
+            st.success("Expenses Saved!")
             
-        st.success("Saved to Google Sheets! 🚀")
-        st.balloons()
-
-# --- 3. THE MAP SECTION ---
-    st.divider()
-    st.subheader("📍 Our Sydney/Melbourne Map")
-
-    # Center on Sydney by default
-    m = folium.Map(location=[-33.8688, 151.2093], zoom_start=12)
-
-    # Simple test pin
-    folium.Marker(
-        [-33.8688, 151.2093], 
-        popup="Sydney Central", 
-        tooltip="We start here!"
-    ).add_to(m)
-
-    st_folium(m, width="stretch", height=400)
-
-# THIS IS THE PART THAT WAS MISSING:
-except Exception as e:
-    st.error(f"Something went wrong: {e}")
+        # Quick Math: Total Cost
+        if not df_exp.empty and 'Cost' in df_exp.columns:
+            total = df_exp['Cost'].sum()
+            st.metric("Total Trip Spend", f"${total:.2f} AUD")
+            st.write(f"Each person owes: **${total/3:.2f}**")
+    except:
+        st.info("Add a tab named 'Expenses' to your Google Sheet to see this work!")
