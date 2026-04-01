@@ -6,17 +6,14 @@ from streamlit_folium import st_folium
 
 st.set_page_config(page_title="Syd/Melb 2026", page_icon="🦘", layout="wide")
 
-# 1. SETUP CONNECTION
+# --- 1. CONNECTION SETUP ---
 try:
-    secret_info = st.secrets["connections"]["gsheets"]
-    conn = st.connection("gsheets", type=GSheetsConnection, **secret_info)
-except:
-    st.error("Connection Secrets missing!")
+    # This version is "smarter" - it tries to find the secrets automatically
+    conn = st.connection("gsheets", type=GSheetsConnection)
+except Exception as e:
+    st.error(f"The Robot can't find its keys! Error: {e}")
+    st.info("Check your Streamlit Secrets. The first line should be [connections.gsheets]")
     st.stop()
-
-url = "PASTE_YOUR_GOOGLE_SHEET_URL_HERE"
-
-st.title("🇦🇺 Australia Trip Hub 2026")
 
 # 2. CREATE THE TABS
 # This creates the navigation bar at the top
