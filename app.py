@@ -3,6 +3,7 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import folium
 from streamlit_folium import st_folium
+from geopy.geocoders import Nominatim # NEW: The Map Translator
 
 st.set_page_config(page_title="Syd/Melb 2026", page_icon="🦘", layout="wide")
 
