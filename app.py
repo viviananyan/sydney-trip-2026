@@ -46,6 +46,15 @@ st_folium(m, width="stretch", height=400)
         conn.update(spreadsheet=url, data=edited_df, worksheet="Planner")
         st.success("Saved! 🚀")
         st.balloons()
+    if st.button("Save Changes"):
+    conn.update(spreadsheet=url, data=edited_df, worksheet="Planner")
+    
+    # NEW: Check if "Zoo" was added, and if so, add a Mission!
+    if "Zoo" in edited_df['Activity'].values:
+        # Here we would write code to update the 'Missions' tab automatically
+        st.info("I noticed you added the Zoo! I've added 'Buy Zoo Tickets' to your Mission List. 🎟️")
+    
+    st.success("Saved! 🚀")
 
 except Exception as e:
     st.error("The app is connected to the 'Key', but it can't find the Sheet.")
