@@ -115,10 +115,12 @@ with tab1:
         )
         
         if st.button("Save Plan"):
-            # --- PHASE 2: DYNAMIC GOOGLE MAPS ROUTING ---
-            st.divider()
-            st.subheader("🗺️ Daily Route Generator")
-            st.write("Click a button to open Google Maps with your pre-loaded route!")
+# ... (Your Save Plan button is right above here)
+
+        # --- PHASE 2: DYNAMIC GOOGLE MAPS ROUTING ---
+        st.divider()
+        st.subheader("🗺️ Daily Route Generator")
+        st.write("Click a button to open Google Maps with your pre-loaded route!")
 
         if not edited_plan.empty:
             # Look at the days we actually have planned
@@ -163,8 +165,6 @@ with tab1:
                             col2.link_button(f"{btn_icon} Route", url)
 
         # ... (Your Smart Sync section starts right below here)
-            conn.update(spreadsheet=url, data=edited_plan, worksheet="Planner")
-            st.success("Plan Saved!")
 
         # 4. THE GATEKEEPER: SMART SYNC BUTTON
         st.divider()
