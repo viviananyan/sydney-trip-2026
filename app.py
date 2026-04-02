@@ -1,3 +1,4 @@
+import urllib.parse
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
@@ -114,6 +115,56 @@ with tab1:
         )
         
         if st.button("Save Plan"):
+        # ... (Your Save Plan button is right above here)
+
+        # --- PHASE 2: DYNAMIC GOOGLE MAPS ROUTING ---
+        st.divider()
+        st.subheader("🗺️ Daily Route Generator")
+        st.write("Click a button to open Google Maps with your pre-loaded route!")
+
+        if not edited_plan.empty:
+            # Look at the days we actually have planned
+            planned_days = edited_plan['Day'].unique()
+            
+            for day in sorted([d for d in planned_days if str(d).strip() != ""]):
+                # Get the schedule for just this one day
+                day_schedule = edited_plan[edited_plan['Day'] == day].copy()
+                
+                # Filter out rows that don't have a location
+                valid_spots = day_schedule[day_schedule['Location'].str.strip() != ""]
+                
+                # We need at least 2 spots to make a route!
+                if len(valid_spots) > 1:
+                    with st.expander(f"📍 View Routes for {day}", expanded=False):
+                        # Loop through the day step-by-step (e.g., Spot 1 -> Spot 2)
+                        for i in range(len(valid_spots) - 1):
+                            start_row = valid_spots.iloc[i]
+                            end_row = valid_spots.iloc[i+1]
+                            
+                            start_loc = str(start_row['Location'])
+                            end_loc = str(end_row['Location'])
+                            
+                            # Figure out what transport mode to tell Google
+                            transport_raw = str(end_row.get('Transport', ''))
+                            gmaps_mode = "transit" # Default to public transport
+                            if "Walk" in transport_raw: gmaps_mode = "walking"
+                            elif "Uber" in transport_raw or "Drive" in transport_raw: gmaps_mode = "driving"
+                            
+                            # Safely encode the locations for a web URL (Adding 'Sydney, Australia' helps Google guess better)
+                            start_enc = urllib.parse.quote(f"{start_loc}, Sydney, Australia")
+                            end_enc = urllib.parse.quote(f"{end_loc}, Sydney, Australia")
+                            
+                            # The magic Google Maps formula
+                            url = f"https://www.google.com/maps/dir/?api=1&origin={start_enc}&destination={end_enc}&travelmode={gmaps_mode}"
+                            
+                            # Display it nicely on the screen
+                            col1, col2 = st.columns([3, 1])
+                            col1.write(f"**{start_row.get('Activity', start_loc)}** ➡️ **{end_row.get('Activity', end_loc)}**")
+                            # Use the emoji from the transport column for the button!
+                            btn_icon = transport_raw.split(" ")[0] if transport_raw else "🗺️"
+                            col2.link_button(f"{btn_icon} Route", url)
+
+        # ... (Your Smart Sync section starts right below here)
             conn.update(spreadsheet=url, data=edited_plan, worksheet="Planner")
             st.success("Plan Saved!")
 
