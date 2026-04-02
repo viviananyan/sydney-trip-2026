@@ -138,7 +138,7 @@ with tab3:
     st.subheader("💰 Expense Manager")
     
     # Update these names to match your travel group!
-    users = ["User 1", "User 2", "User 3"] 
+    users = ["Sally", "Suri", "Bobo"] 
     categories = ["🍔 Food", "🚗 Transport", "🏨 Hotel", "🎟️ Activity", "🛍️ Shopping", "✨ Other"]
 
     try:
