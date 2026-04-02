@@ -1,4 +1,3 @@
-import urllib.parse
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
@@ -33,15 +32,15 @@ def get_coordinates(location_name):
     try:
         # We swapped Nominatim for ArcGIS!
         geolocator = ArcGIS()
-        
+
         # Ask it to find the location in Australia
         location = geolocator.geocode(f"{location_name}, Australia", timeout=10)
-        
+
         if location:
             return [location.latitude, location.longitude]
         else:
             return None
-            
+
     except Exception as e:
         st.error(f"ArcGIS crashed on '{location_name}'! The error: {e}")
         return None
@@ -59,7 +58,9 @@ with tab1:
 
     try:
         df_plan = conn.read(spreadsheet=url, worksheet="Planner", ttl=60)
-        
+
+        # 1. FORCE THE NEW COLUMNS
+        for col in ['Needs Booking', 'Sent to Expenses']:
         # 1. FORCE ALL REQUIRED COLUMNS
         required_planner_cols = [
             'Day', 'Start Time', 'End Time', 'Location', 'Activity', 
@@ -68,18 +69,24 @@ with tab1:
         
         for col in required_planner_cols:
             if col not in df_plan.columns:
+                df_plan[col] = False
                 df_plan[col] = None
         
         # Keep only required columns to tidy up the view
         df_plan = df_plan[required_planner_cols]
-                
+
         # 2. THE CLEANING STATION
         df_plan = df_plan.dropna(how="all")
-        
+
+        # Ensure the checkboxes act like booleans (True/False)
         # Booleans for our checkboxes
         df_plan['Needs Booking'] = df_plan['Needs Booking'].fillna(False).astype(bool)
         df_plan['Sent to Expenses'] = df_plan['Sent to Expenses'].fillna(False).astype(bool)
-        
+
+        # Force everything else to be text
+        for col in df_plan.columns:
+            if col not in ['Needs Booking', 'Sent to Expenses']:
+                df_plan[col] = df_plan[col].fillna("").astype(str)
         # Time Parser: Converts Google Sheet strings (like "09:00") into actual Time Objects for Streamlit
         import pandas as pd
         for col in ['Start Time', 'End Time']:
@@ -95,12 +102,14 @@ with tab1:
             
         # Optional: Sort the table so Day 1 is always at the top!
         df_plan = df_plan.sort_values(by=['Day', 'Start Time'], na_position='last')
-        
+
+        # 3. THE EDITOR
         # 3. THE ADVANCED EDITOR
         edited_plan = st.data_editor(
             df_plan, 
             num_rows="dynamic", 
             width="stretch", 
+            key="plan_editor",
             key="plan_editor_v2",
             column_config={
                 "Day": st.column_config.SelectboxColumn("Day", options=days),
@@ -110,94 +119,61 @@ with tab1:
                 "Activity": st.column_config.TextColumn("Activity"),
                 "Transport": st.column_config.SelectboxColumn("Transport", options=transit_modes),
                 "Needs Booking": st.column_config.CheckboxColumn("Needs Booking?"),
+                "Sent to Expenses": st.column_config.CheckboxColumn("Synced?") # Disabled so you can't accidentally click it manually!
                 "Sent to Expenses": st.column_config.CheckboxColumn("Synced?") 
             }
         )
-        
+
         if st.button("Save Plan"):
-# ... (Your Save Plan button is right above here)
-
-        # --- PHASE 2: DYNAMIC GOOGLE MAPS ROUTING ---
-        st.divider()
-        st.subheader("🗺️ Daily Route Generator")
-        st.write("Click a button to open Google Maps with your pre-loaded route!")
-
-        if not edited_plan.empty:
-            # Look at the days we actually have planned
-            planned_days = edited_plan['Day'].unique()
-            
-            for day in sorted([d for d in planned_days if str(d).strip() != ""]):
-                # Get the schedule for just this one day
-                day_schedule = edited_plan[edited_plan['Day'] == day].copy()
-                
-                # Filter out rows that don't have a location
-                valid_spots = day_schedule[day_schedule['Location'].str.strip() != ""]
-                
-                # We need at least 2 spots to make a route!
-                if len(valid_spots) > 1:
-                    with st.expander(f"📍 View Routes for {day}", expanded=False):
-                        # Loop through the day step-by-step (e.g., Spot 1 -> Spot 2)
-                        for i in range(len(valid_spots) - 1):
-                            start_row = valid_spots.iloc[i]
-                            end_row = valid_spots.iloc[i+1]
-                            
-                            start_loc = str(start_row['Location'])
-                            end_loc = str(end_row['Location'])
-                            
-                            # Figure out what transport mode to tell Google
-                            transport_raw = str(end_row.get('Transport', ''))
-                            gmaps_mode = "transit" # Default to public transport
-                            if "Walk" in transport_raw: gmaps_mode = "walking"
-                            elif "Uber" in transport_raw or "Drive" in transport_raw: gmaps_mode = "driving"
-                            
-                            # Safely encode the locations for a web URL (Adding 'Sydney, Australia' helps Google guess better)
-                            start_enc = urllib.parse.quote(f"{start_loc}, Sydney, Australia")
-                            end_enc = urllib.parse.quote(f"{end_loc}, Sydney, Australia")
-                            
-                            # The magic Google Maps formula
-                            url = f"https://www.google.com/maps/dir/?api=1&origin={start_enc}&destination={end_enc}&travelmode={gmaps_mode}"
-                            
-                            # Display it nicely on the screen
-                            col1, col2 = st.columns([3, 1])
-                            col1.write(f"**{start_row.get('Activity', start_loc)}** ➡️ **{end_row.get('Activity', end_loc)}**")
-                            # Use the emoji from the transport column for the button!
-                            btn_icon = transport_raw.split(" ")[0] if transport_raw else "🗺️"
-                            col2.link_button(f"{btn_icon} Route", url)
-
-        # ... (Your Smart Sync section starts right below here)
+            conn.update(spreadsheet=url, data=edited_plan, worksheet="Planner")
+            st.success("Plan Saved!")
 
         # 4. THE GATEKEEPER: SMART SYNC BUTTON
         st.divider()
         st.subheader("🤖 Smart Sync")
         st.write("Click below to send any checked 'Needs Booking' items to your Expenses tab.")
-        
+
         if st.button("📥 Push Bookings to Expenses"):
             new_expenses = []
+            
+            # Scan the planner for unsynced bookings
             for index, row in edited_plan.iterrows():
                 if row['Needs Booking'] == True and row['Sent to Expenses'] == False:
-                    
+
+                    # Try to get the Activity name, or fallback to Location
                     item_name = str(row.get('Activity', '')).strip()
                     if item_name == "" or item_name.lower() == "nan":
                         item_name = str(row.get('Location', 'Unknown Booking')).strip()
-                        
+
+                    # Build the new Expense receipt!
                     new_expenses.append({
                         'Date': '',
                         'Category': '🎟️ Activity',
                         'Item': item_name,
                         'Cost': 0.0,
+                        'Paid By': 'Sally🦕', # Default filler
                         'Paid By': 'Sally🦕',
                         'Split By': 'All',
                         'Remark': 'Auto-synced from Planner'
                     })
-                    edited_plan.at[index, 'Sent to Expenses'] = True
                     
+                    # Mark as sent in the Planner so it doesn't duplicate next time
+                    edited_plan.at[index, 'Sent to Expenses'] = True
+
+            # If we found items to sync, let's update the databases
             if len(new_expenses) > 0:
+                # First, save the "Sent" checkmarks to the Planner
                 conn.update(spreadsheet=url, data=edited_plan, worksheet="Planner")
+                
+                # Second, grab the live Expenses sheet, add the new rows, and save it
+                import pandas as pd # Just making sure pandas is ready
                 df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=0)
                 df_exp_new = pd.concat([df_exp, pd.DataFrame(new_expenses)], ignore_index=True)
                 conn.update(spreadsheet=url, data=df_exp_new, worksheet="Expenses")
-                
+
                 st.success(f"🎉 Successfully pushed {len(new_expenses)} items to Expenses!")
+                st.cache_data.clear() # Wipe the robot's memory so it sees the updates
+                st.rerun() # Refresh the page automatically
                 st.cache_data.clear()
                 st.rerun()
             else:
@@ -208,16 +184,16 @@ with tab1:
         st.subheader("📍 Location Map")
         st.write("🕵️ **Robot's Thought Process:**")
         m = folium.Map(location=[-33.8688, 151.2093], zoom_start=11)
-        
+
         if 'Location' in edited_plan.columns and 'Activity' in edited_plan.columns:
             for index, row in edited_plan.iterrows():
                 loc_name = str(row.get('Location', '')).strip()
                 act_name = str(row.get('Activity', '')).strip()
-                
+
                 if loc_name != "" and loc_name.lower() != "nan" and loc_name.lower() != "none":
                     coords = get_coordinates(loc_name)
                     st.write(f"- Searching for '{loc_name}'... Coordinates: `{coords}`")
-                    
+
                     if coords:
                         folium.Marker(
                             coords, 
@@ -227,17 +203,17 @@ with tab1:
                         ).add_to(m)
 
         st_folium(m, width="stretch", height=400, key="trip_map")
-        
+
     except Exception as e:
         st.error(f"Robot can't read the 'Planner' tab. Error: {e}")
 # --- TAB 2: EXPENSES ---
 with tab2:
     st.subheader("💰 Expense Manager")
-    
+
     # 1. CONFIGURATION 
     users = ["Sally🦕", "Suri🐶", "Bobo🍔"] 
     categories = ["🍔 Food", "🚗 Transport", "🏨 Hotel", "🎟️ Activity", "🛍️ Shopping", "✨ Other"]
-    
+
     # Auto-generate dropdown combinations for 3 people
     split_options = [
         "All", 
@@ -249,23 +225,23 @@ with tab2:
 
     try:
         df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=60)
-        
+
         # 2. FORCE COLUMNS 
         required_cols = ['Date', 'Category', 'Item', 'Cost', 'Paid By', 'Split By', 'Remark']
         for col in required_cols:
             if col not in df_exp.columns:
                 df_exp[col] = None
-                
+
         df_exp = df_exp[required_cols]
 
         # 3. DATA CLEANING
         df_exp = df_exp.dropna(how="all")
-        
+
         if 'Date' in df_exp.columns:
             df_exp['Date'] = pd.to_datetime(df_exp['Date'], errors='coerce').dt.date
         if 'Cost' in df_exp.columns:
             df_exp['Cost'] = pd.to_numeric(df_exp['Cost'], errors='coerce').fillna(0.0)
-            
+
         for col in ['Category', 'Item', 'Paid By', 'Split By', 'Remark']:
             df_exp[col] = df_exp[col].fillna("").astype(str)
             if col == 'Split By':
@@ -286,7 +262,7 @@ with tab2:
                 "Remark": st.column_config.TextColumn("Remark"),
             }
         )
-        
+
         if st.button("Save All Changes"):
             conn.update(spreadsheet=url, data=edited_exp, worksheet="Expenses")
             st.success("Expenses updated and synced!")
@@ -296,24 +272,24 @@ with tab2:
         if not edited_exp.empty:
             total_spend = edited_exp['Cost'].sum()
             st.metric("Total Trip Spend", f"${total_spend:.2f} AUD")
-            
+
             st.write("### 💸 Who Owes Who")
-            
+
             # Setup tracking dictionaries
             balances = {u: 0.0 for u in users}
             total_paid = {u: 0.0 for u in users}
-            
+
             # Read every single receipt one by one
             for index, row in edited_exp.iterrows():
                 cost = float(row.get('Cost', 0.0))
                 paid_by = str(row.get('Paid By', '')).strip()
                 split_val = str(row.get('Split By', 'All')).strip()
-                
+
                 if cost > 0 and paid_by in users:
                     # Credit the person who paid out of pocket
                     total_paid[paid_by] += cost
                     balances[paid_by] += cost
-                    
+
                     # Figure out who shares this specific bill
                     if split_val == "All" or split_val == "None":
                         debtors = users
@@ -322,12 +298,12 @@ with tab2:
                         debtors = [u for u in users if u in split_val]
                         if not debtors: 
                             debtors = users
-                            
+
                     # Debit the fraction from everyone involved
                     split_cost = cost / len(debtors)
                     for d in debtors:
                         balances[d] -= split_cost
-            
+
             # Display the final math
             summary_data = []
             for user in users:
@@ -338,15 +314,15 @@ with tab2:
                     status = "🔴 To pay"
                 else:
                     status = "⚪ Settled"
-                    
+
                 summary_data.append({
                     "Person": user,
                     "Total Paid": f"${total_paid[user]:.2f}",
                     "Balance": f"${abs(bal):.2f}",
                     "Status": status
                 })
-            
+
             st.table(summary_data)
-            
+
     except Exception as e:
         st.error(f"Financial Robot hit a snag: {e}")
