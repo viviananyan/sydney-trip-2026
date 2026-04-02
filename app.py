@@ -276,6 +276,31 @@ with tab2:
         met1.metric("Total Trip Cost", f"${total_trip_cost:,.2f} {target_currency}")
         met2.metric("Unsettled Debts", f"${total_unsettled:,.2f} {target_currency}")
         met3.metric("Already Settled", f"${total_settled:,.2f} {target_currency}")
+        
+        # New: Individual Expense Breakdown (How much of the total trip cost belongs to each person)
+        st.write("##### 🧑‍🤝‍🧑 Personal Expense Breakdown")
+        user_shares = {user: 0.0 for user in trip_users}
+        
+        for idx, row in df_exp.iterrows():
+            cost = float(row[calc_col])
+            if cost > 0:
+                split_str = str(row['Split By']).strip()
+                if split_str == 'All':
+                    involved = trip_users
+                else:
+                    involved = [u.strip() for u in split_str.split(',') if u.strip() in trip_users]
+                    if not involved: 
+                        involved = trip_users
+                        
+                split_amount = cost / len(involved)
+                for person in involved:
+                    user_shares[person] += split_amount
+                    
+        share_cols = st.columns(len(trip_users))
+        for i, user in enumerate(trip_users):
+            with share_cols[i]:
+                st.info(f"**{user}**\n\n${user_shares[user]:,.2f} {target_currency}")
+
         st.divider()
 
         # --- 2B: THE CLEAN LEDGER ---
@@ -322,14 +347,12 @@ with tab2:
         active_debts = edited_exp[edited_exp['Settled'] == False].copy()
         
         if not active_debts.empty:
-            # Initialize a unified balance in a base currency (AUD) for perfect math
             balances_aud = {user: 0.0 for user in trip_users}
             
             for idx, row in active_debts.iterrows():
                 raw_cost = float(row['Cost'])
                 currency = row['Currency']
                 
-                # Convert everything to AUD behind the scenes for unified mixing
                 if currency == 'HKD':
                     cost_in_aud = raw_cost / aud_to_hkd
                 else:
@@ -342,7 +365,7 @@ with tab2:
                     if split_str == 'All':
                         involved = trip_users
                     else:
-                        involved = [u.strip() for u in split_str.split(',')]
+                        involved = [u.strip() for u in split_str.split(',') if u.strip() in trip_users]
                         if not involved: 
                             involved = trip_users
                             
@@ -352,13 +375,12 @@ with tab2:
                     for person in involved:
                         balances_aud[person] -= split_amount
 
-            # Display the unified balance showing BOTH equivalents stacked!
             cols = st.columns(len(trip_users))
             for i, user in enumerate(trip_users):
                 with cols[i]:
                     st.write(f"**{user}**")
                     net_aud = balances_aud[user]
-                    net_hkd = net_aud * aud_to_hkd # Calculate the exact HKD equivalent
+                    net_hkd = net_aud * aud_to_hkd 
                     
                     if net_aud > 0.01:
                         st.success(f"+ ${net_aud:.2f} AUD\n\n(+ ${net_hkd:.2f} HKD)")
@@ -368,7 +390,7 @@ with tab2:
                         st.write("All Settled!")
 
         else:
-            st.success("🎉 All debts are settled! You guys are awesome.")
+            st.success("🎉 All settled!冇拖冇欠啦！")
             
     except Exception as e:
          st.error(f"Robot can't read the 'Expenses' tab. Error: {e}")
