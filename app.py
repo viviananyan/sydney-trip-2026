@@ -256,7 +256,7 @@ with tab2:
         df_exp['Currency'] = df_exp['Currency'].replace("", "AUD") 
         df_exp['Split By'] = df_exp['Split By'].replace("", "All")
 
-        # Background calculations for the Overview & Conversions
+        # --- 1. BACKGROUND MATH (Always calculates everything) ---
         def get_hkd(row):
             return row['Cost'] * aud_to_hkd if row['Currency'] == 'AUD' else row['Cost']
         def get_aud(row):
@@ -272,14 +272,18 @@ with tab2:
         df_exp['Cost_HKD'] = df_exp.apply(get_hkd, axis=1)
         df_exp['Cost_AUD'] = df_exp.apply(get_aud, axis=1)
         
-        # Calculate Per Person splits dynamically
         df_exp['Split_Count'] = df_exp['Split By'].apply(get_split_count)
         df_exp['Per_Person_Cost'] = df_exp['Cost'] / df_exp['Split_Count']
         df_exp['Per_Person_HKD'] = df_exp['Cost_HKD'] / df_exp['Split_Count']
         df_exp['Per_Person_AUD'] = df_exp['Cost_AUD'] / df_exp['Split_Count']
 
         calc_col = 'Cost_HKD' if target_currency == "HKD" else 'Cost_AUD'
-        per_person_calc_col = 'Per_Person_HKD' if target_currency == "HKD" else 'Per_Person_AUD'
+
+        # --- 2. FRONT-END DISPLAY MATH (Blanks out redundant conversions) ---
+        df_exp['Display_Total_HKD'] = df_exp.apply(lambda r: r['Cost_HKD'] if r['Currency'] == 'AUD' else None, axis=1)
+        df_exp['Display_Total_AUD'] = df_exp.apply(lambda r: r['Cost_AUD'] if r['Currency'] == 'HKD' else None, axis=1)
+        df_exp['Display_Person_HKD'] = df_exp.apply(lambda r: r['Per_Person_HKD'] if r['Currency'] == 'AUD' else None, axis=1)
+        df_exp['Display_Person_AUD'] = df_exp.apply(lambda r: r['Per_Person_AUD'] if r['Currency'] == 'HKD' else None, axis=1)
 
         # --- 2A: TRIP OVERVIEW ---
         st.write("### 📊 Trip Overview")
@@ -292,7 +296,6 @@ with tab2:
         met2.metric("Unsettled Debts", f"${total_unsettled:,.2f} {target_currency}")
         met3.metric("Already Settled", f"${total_settled:,.2f} {target_currency}")
         
-        # Individual Expense Breakdown + Category Tracking
         st.write("##### 🧑‍🤝‍🧑 Personal Expense Breakdown")
         user_shares = {user: 0.0 for user in trip_users}
         user_cat_shares = {user: {cat: 0.0 for cat in expense_categories} for user in trip_users}
@@ -367,12 +370,13 @@ with tab2:
             for combo in itertools.combinations(trip_users, r):
                 split_options.append(", ".join(combo))
                 
-        # Insert Per Person directly after Cost, and converted columns if toggled
         base_display_cols = ['Date', 'Category', 'Item', 'Currency', 'Cost', 'Per_Person_Cost', 'Paid By', 'Split By', 'Settled', 'Remark']
         
         if show_conversion:
-            # We insert the estimated columns right after the raw per-person cost
-            display_cols = base_display_cols[:6] + [calc_col, per_person_calc_col] + base_display_cols[6:]
+            if target_currency == "HKD":
+                display_cols = base_display_cols[:6] + ['Display_Total_HKD', 'Display_Person_HKD'] + base_display_cols[6:]
+            else:
+                display_cols = base_display_cols[:6] + ['Display_Total_AUD', 'Display_Person_AUD'] + base_display_cols[6:]
         else:
             display_cols = base_display_cols
 
@@ -387,10 +391,13 @@ with tab2:
                 "Currency": st.column_config.SelectboxColumn("Currency", options=["AUD", "HKD"]),
                 "Cost": st.column_config.NumberColumn("Cost", format="%.2f"),
                 "Per_Person_Cost": st.column_config.NumberColumn("Per Person", format="%.2f", disabled=True),
-                "Cost_HKD": st.column_config.NumberColumn("Est. Total HKD", format="%.2f", disabled=True),
-                "Cost_AUD": st.column_config.NumberColumn("Est. Total AUD", format="%.2f", disabled=True),
-                "Per_Person_HKD": st.column_config.NumberColumn("Est. Person HKD", format="%.2f", disabled=True),
-                "Per_Person_AUD": st.column_config.NumberColumn("Est. Person AUD", format="%.2f", disabled=True),
+                
+                # These columns will show as blank/un-editable when the currency matches
+                "Display_Total_HKD": st.column_config.NumberColumn("Est. Total HKD", format="%.2f", disabled=True),
+                "Display_Total_AUD": st.column_config.NumberColumn("Est. Total AUD", format="%.2f", disabled=True),
+                "Display_Person_HKD": st.column_config.NumberColumn("Est. Person HKD", format="%.2f", disabled=True),
+                "Display_Person_AUD": st.column_config.NumberColumn("Est. Person AUD", format="%.2f", disabled=True),
+                
                 "Paid By": st.column_config.SelectboxColumn("Paid By", options=trip_users),
                 "Split By": st.column_config.SelectboxColumn("Split By", options=split_options),
                 "Settled": st.column_config.CheckboxColumn("Settled? ✅")
@@ -398,9 +405,10 @@ with tab2:
         )
         
         if st.button("💾 Save Expenses"):
-            # Safely drop all background math columns before saving back to the DB!
+            # Drop all math AND display columns so we don't pollute your database
             clean_save_df = edited_exp.drop(
-                columns=['Cost_HKD', 'Cost_AUD', 'Per_Person_Cost', 'Per_Person_HKD', 'Per_Person_AUD', 'Split_Count'], 
+                columns=['Cost_HKD', 'Cost_AUD', 'Per_Person_Cost', 'Per_Person_HKD', 'Per_Person_AUD', 'Split_Count', 
+                         'Display_Total_HKD', 'Display_Total_AUD', 'Display_Person_HKD', 'Display_Person_AUD'], 
                 errors='ignore'
             )
             conn.update(spreadsheet=url, data=clean_save_df, worksheet="Expenses")
