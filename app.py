@@ -19,7 +19,7 @@ def get_aud_to_hkd_rate():
         return 5.15 # Safe fallback if the API is offline
         # --- CONFIGURATION (UPDATE THESE WITH YOUR ACTUAL FRIENDS' NAMES!) ---
 trip_users = ["Sally🦕", "Suri🐶", "Bobo🍔"]
-expense_categories = ["🎟️ Activity", "🍔 Food", "🏠 Stay", "✈️ Flight", "🚗 Transport", "🛍️ Shopping", "💡 Other"]
+expense_categories = ["🎟️ Activity", "🍪 Food", "🏠 Stay", "✈️ Flight", "🚗 Transport", "🛍️ Shopping", "💡 Other"]
 
 st.set_page_config(page_title="Syd/Melb 2026", page_icon="🦘", layout="wide")
 
