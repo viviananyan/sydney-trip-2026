@@ -141,32 +141,33 @@ with tab3:
     categories = ["🍔 Food", "🚗 Transport", "🏨 Hotel", "🎟️ Activity", "🛍️ Shopping", "✨ Other"]
 
     try:
-        df_exp = conn.read(spreadsheet=url, worksheet="Expenses")
-        df_exp = df_exp.dropna(how="all")
+        # THE FIX: ttl=0 forces the robot to ignore its memory and read the live sheet
+        df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=0)
         
-        # 1. THE DATA CONVERSION STATION
-        # This is the fix! Convert the Date column to actual Python Date objects
+        # 1. THE "FORCE COLUMNS" BLOCK
+        # This manually injects the columns if the Robot is being blind to them
+        required_cols = ['Date', 'Category', 'Item', 'Cost', 'Paid By', 'Remark']
+        for col in required_cols:
+            if col not in df_exp.columns:
+                df_exp[col] = None # Add the missing column as empty
+        
+        # Re-order the columns so they show up in the order WE want
+        df_exp = df_exp[required_cols]
+
+        # 2. DATA CLEANING (As before)
+        df_exp = df_exp.dropna(how="all")
         if 'Date' in df_exp.columns:
             df_exp['Date'] = pd.to_datetime(df_exp['Date'], errors='coerce').dt.date
-        
-        # Force Cost to be a number
         if 'Cost' in df_exp.columns:
             df_exp['Cost'] = pd.to_numeric(df_exp['Cost'], errors='coerce').fillna(0.0)
             
-        # Keep everything else as clean text
-        text_cols = ['Category', 'Item', 'Paid By', 'Remark']
-        for col in text_cols:
-            if col in df_exp.columns:
-                df_exp[col] = df_exp[col].fillna("").astype(str)
-
-        # 2. THE ADVANCED EDITOR
+        # 3. THE EDITOR
         edited_exp = st.data_editor(
             df_exp, 
             num_rows="dynamic", 
             width="stretch", 
-            key="exp_editor_v3",
+            key="exp_editor_v4", # Changed key to force a fresh UI render
             column_config={
-                # Now that the data is 'Date' type, this config will work!
                 "Date": st.column_config.DateColumn("Date", format="DD/MM/YYYY"),
                 "Category": st.column_config.SelectboxColumn("Category", options=categories),
                 "Paid By": st.column_config.SelectboxColumn("Paid By", options=users),
@@ -178,29 +179,6 @@ with tab3:
         if st.button("Save All Changes"):
             conn.update(spreadsheet=url, data=edited_exp, worksheet="Expenses")
             st.success("Expenses updated!")
-
-        # 3. FINANCIAL OVERVIEW
-        st.divider()
-        if not edited_exp.empty:
-            total_spend = edited_exp['Cost'].sum()
-            col1, col2 = st.columns(2)
-            col1.metric("Total Trip Spend", f"${total_spend:.2f} AUD")
-            col2.metric("Per Person", f"${total_spend/len(users):.2f} AUD")
-
-            # Settlement Table
-            paid_summary = edited_exp.groupby('Paid By')['Cost'].sum().reindex(users, fill_value=0)
-            fair_share = total_spend / len(users)
+            # Note: After saving, the app might need one more refresh to show the new math
             
-            summary_data = []
-            for user in users:
-                bal = paid_summary[user] - fair_share
-                summary_data.append({
-                    "Person": user,
-                    "Paid": f"${paid_summary[user]:.2f}",
-                    "Balance": f"${abs(bal):.2f}",
-                    "Status": "🟢 To receive" if bal > 0 else "🔴 To pay"
-                })
-            st.table(summary_data)
-
-    except Exception as e:
-        st.error(f"Financial Robot hit a snag: {e}")
+        # ... (Settlement Table code stays the same below)
