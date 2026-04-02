@@ -94,19 +94,39 @@ with tab1:
 
 # --- TAB 2: MISSIONS ---
 with tab2:
-    st.subheader("Trip Missions (To-Do)")
+    st.subheader("🎯 Trip Missions (To-Do)")
     try:
         df_miss = conn.read(spreadsheet=url, worksheet="Missions")
         
-        # Clean the data
+        # 1. THE CLEANING STATION
         df_miss = df_miss.dropna(how="all")
-        df_miss = df_miss.fillna("")
         
-        edited_miss = st.data_editor(df_miss, num_rows="dynamic", width="stretch", key="miss_editor")
+        # Ensure 'Done' column exists and is True/False (Boolean)
+        # Make sure your Google Sheet has a column named exactly 'Done'
+        if 'Done' in df_miss.columns:
+            df_miss['Done'] = df_miss['Done'].fillna(False).astype(bool)
+        
+        # Fill all other empty cells with blank text
+        for col in df_miss.columns:
+            if col != 'Done':
+                df_miss[col] = df_miss[col].fillna("").astype(str)
+        
+        # 2. THE MISSION EDITOR
+        edited_miss = st.data_editor(
+            df_miss, 
+            num_rows="dynamic", 
+            width="stretch", 
+            key="miss_editor",
+            column_config={
+                # This turns the 'Done' column into clickable checkboxes!
+                "Done": st.column_config.CheckboxColumn("Done?", default=False)
+            }
+        )
         
         if st.button("Save Missions"):
             conn.update(spreadsheet=url, data=edited_miss, worksheet="Missions")
             st.success("Missions Updated!")
+
     except Exception as e:
         st.error(f"Robot can't read the 'Missions' tab. The real error is: {e}")
 
