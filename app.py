@@ -135,40 +135,85 @@ with tab2:
 
 # --- TAB 3: EXPENSES ---
 with tab3:
-    st.subheader("Shared Expenses")
+    st.subheader("💰 Expense Manager")
+    
+    # --- CONFIGURATION ---
+    # EDIT THESE NAMES TO YOUR ACTUAL NAMES:
+    users = ["User 1", "User 2", "User 3"] 
+    categories = ["🍔 Food", "🚗 Transport", "🏨 Hotel", "🎟️ Activity", "🛍️ Shopping", "✨ Other"]
+
     try:
         df_exp = conn.read(spreadsheet=url, worksheet="Expenses")
         
-        # Clean the data
+        # 1. CLEANING
         df_exp = df_exp.dropna(how="all")
         
-        # Separate numbers from text
-        if 'Cost' in df_exp.columns:
-            df_exp['Cost'] = pd.to_numeric(df_exp['Cost'], errors='coerce')
-            
-        for col in df_exp.columns:
-            if col != 'Cost':
-                df_exp[col] = df_exp[col].fillna("").astype(str)
+        # Ensure all columns exist and are the right type
+        required_cols = ['Date', 'Category', 'Item', 'Cost', 'Paid By', 'Remark']
+        for col in required_cols:
+            if col not in df_exp.columns:
+                df_exp[col] = "" # Create it if it's missing
         
+        # Force types for the editor to behave
+        df_exp['Cost'] = pd.to_numeric(df_exp['Cost'], errors='coerce').fillna(0.0)
+        df_exp['Paid By'] = df_exp['Paid By'].astype(str)
+        df_exp['Category'] = df_exp['Category'].astype(str)
+
+        # 2. THE ADVANCED EDITOR
+        st.write("💡 *Tip: Click column headers to sort!*")
         edited_exp = st.data_editor(
             df_exp, 
             num_rows="dynamic", 
             width="stretch", 
-            key="exp_editor",
+            key="exp_editor_v2",
             column_config={
-                "Cost": st.column_config.NumberColumn("Cost", format="$%.2f", min_value=0.0)
+                "Date": st.column_config.DateColumn("Date", format="DD/MM/YYYY"),
+                "Category": st.column_config.SelectboxColumn("Category", options=categories, required=True),
+                "Paid By": st.column_config.SelectboxColumn("Paid By", options=users, required=True),
+                "Cost": st.column_config.NumberColumn("Cost ($)", format="$%.2f", min_value=0),
+                "Remark": st.column_config.TextColumn("Remark", help="Notes for future reference"),
             }
         )
         
-        if st.button("Save Expenses"):
+        if st.button("Save All Changes"):
             conn.update(spreadsheet=url, data=edited_exp, worksheet="Expenses")
-            st.success("Expenses Saved!")
+            st.success("Expenses updated and synced!")
+
+        # 3. FINANCIAL OVERVIEW
+        st.divider()
+        st.subheader("📊 Settlement Summary")
+        
+        if not edited_exp.empty:
+            total_spend = edited_exp['Cost'].sum()
             
-        # Quick Math
-        if not df_exp.empty and 'Cost' in edited_exp.columns:
-            total = edited_exp['Cost'].sum()
-            st.metric("Total Trip Spend", f"${total:.2f} AUD")
-            st.write(f"Each person owes: **${total/3:.2f}**")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Total Trip Spend", f"${total_spend:.2f} AUD")
+            with col2:
+                st.metric("Per Person (Equal Split)", f"${total_spend/len(users):.2f} AUD")
+
+            # --- WHO OWES WHO LOGIC ---
+            st.write("### 💸 Current Standing")
+            # Calculate how much each person has actually paid out of pocket
+            paid_summary = edited_exp.groupby('Paid By')['Cost'].sum().reindex(users, fill_value=0)
             
+            # The fair share each person should have paid
+            fair_share = total_spend / len(users)
+            
+            # Create a summary table
+            summary_data = []
+            for user in users:
+                amount_paid = paid_summary[user]
+                balance = amount_paid - fair_share
+                status = "🟢 To receive" if balance > 0 else "🔴 To pay"
+                summary_data.append({
+                    "Person": user,
+                    "Paid Out of Pocket": f"${amount_paid:.2f}",
+                    "Balance": f"${abs(balance):.2f}",
+                    "Action": status
+                })
+            
+            st.table(summary_data)
+
     except Exception as e:
-        st.error(f"Robot can't read the 'Expenses' tab. The real error is: {e}")
+        st.error(f"Financial Robot hit a snag: {e}")
