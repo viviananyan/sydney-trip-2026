@@ -58,7 +58,6 @@ with tab1:
     try:
         df_plan = conn.read(spreadsheet=url, worksheet="Planner", ttl=60)
         
-        # 1. REMOVED 'Sent to Expenses' - we don't need it anymore!
         required_planner_cols = [
             'Day', 'Start Time', 'End Time', 'Location', 'Activity', 'Needs Booking'
         ]
@@ -68,10 +67,7 @@ with tab1:
                 df_plan[col] = None
         
         df_plan = df_plan[required_planner_cols]
-                
-        # 2. THE CLEANING STATION
         df_plan = df_plan.dropna(how="all")
-        
         df_plan['Needs Booking'] = df_plan['Needs Booking'].fillna(False).astype(bool)
         
         for col in ['Start Time', 'End Time', 'Day', 'Location', 'Activity']:
@@ -85,8 +81,8 @@ with tab1:
             df_plan, 
             num_rows="dynamic", 
             width="stretch", 
-            hide_index=True,  # <-- THIS HIDES THE ANNOYING ROW NUMBERS!
-            key="plan_editor_v5",
+            hide_index=True,  
+            key="plan_editor_v6",
             column_config={
                 "Day": st.column_config.SelectboxColumn("Day", options=days),
                 "Start Time": st.column_config.TextColumn("Start Time (e.g. 09:00)"),
@@ -97,9 +93,53 @@ with tab1:
             }
         )
         
-        if st.button("Save Plan"):
+        # --- THE NEW "ALL-IN-ONE" SAVE & SYNC BUTTON ---
+        if st.button("💾 Save & Sync Plan"):
+            # 1. Update the Planner tab
             conn.update(spreadsheet=url, data=edited_plan, worksheet="Planner")
-            st.success("Plan Saved!")
+            
+            # 2. Run the Smart Sync immediately
+            import pandas as pd
+            # Use ttl=0 to force Streamlit to pull the freshest version of Expenses
+            df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=0)
+            
+            existing_items = []
+            if 'Item' in df_exp.columns:
+                # Convert everything to lowercase to prevent duplicate errors
+                existing_items = [str(x).strip().lower() for x in df_exp['Item'].fillna("").tolist()]
+
+            new_expenses = []
+            for index, row in edited_plan.iterrows():
+                if row.get('Needs Booking') == True:
+                    
+                    item_name = str(row.get('Activity', '')).strip()
+                    if not item_name or item_name.lower() == "nan":
+                        item_name = str(row.get('Location', 'Unknown Booking')).strip()
+                    
+                    # Check in lowercase to match safely!
+                    if item_name and item_name.lower() not in existing_items:
+                        new_expenses.append({
+                            'Date': '',
+                            'Category': '🎟️ Activity',
+                            'Item': item_name,
+                            'Cost': 0.0,
+                            'Paid By': 'Sally🦕',
+                            'Split By': 'All',
+                            'Remark': 'Auto-synced from Planner'
+                        })
+                        # Add to our lowercase checker list to prevent duplicates in the same batch
+                        existing_items.append(item_name.lower())
+                        
+            if len(new_expenses) > 0:
+                df_exp_new = pd.concat([df_exp, pd.DataFrame(new_expenses)], ignore_index=True)
+                conn.update(spreadsheet=url, data=df_exp_new, worksheet="Expenses")
+                st.success(f"✅ Plan saved AND automatically pushed {len(new_expenses)} new bookings to Expenses!")
+            else:
+                st.success("✅ Plan saved! (No new bookings needed syncing)")
+                
+            # Clear cache and refresh to show the clean state
+            st.cache_data.clear()
+            st.rerun()
 
         # --- PHASE 2: DYNAMIC GOOGLE MAPS ROUTING ---
         st.divider()
@@ -131,48 +171,6 @@ with tab1:
                             col1.write(f"**{start_row.get('Activity', start_loc)}** ➡️ **{end_row.get('Activity', end_loc)}**")
                             col2.link_button("🗺️ Get Route", route_url)
 
-        # 4. TRULY SMART SYNC BUTTON
-        st.divider()
-        st.subheader("🤖 Smart Sync")
-        
-        if st.button("📥 Push Bookings to Expenses"):
-            import pandas as pd
-            # Read the current Expenses to see what we already have
-            df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=0)
-            
-            # Get a list of all existing items so we don't duplicate them
-            existing_items = []
-            if 'Item' in df_exp.columns:
-                existing_items = df_exp['Item'].fillna("").astype(str).str.strip().tolist()
-
-            new_expenses = []
-            for index, row in edited_plan.iterrows():
-                if row['Needs Booking'] == True:
-                    
-                    item_name = str(row.get('Activity', '')).strip()
-                    if item_name == "" or item_name.lower() == "nan":
-                        item_name = str(row.get('Location', 'Unknown Booking')).strip()
-                    
-                    # MAGIC CHECK: Only add it if it is NOT already in the expenses list
-                    if item_name and item_name not in existing_items:
-                        new_expenses.append({
-                            'Date': '',
-                            'Category': '🎟️ Activity',
-                            'Item': item_name,
-                            'Cost': 0.0,
-                            'Paid By': 'Sally🦕',
-                            'Split By': 'All',
-                            'Remark': 'Auto-synced from Planner'
-                        })
-                    
-            if len(new_expenses) > 0:
-                df_exp_new = pd.concat([df_exp, pd.DataFrame(new_expenses)], ignore_index=True)
-                conn.update(spreadsheet=url, data=df_exp_new, worksheet="Expenses")
-                st.success(f"🎉 Successfully pushed {len(new_expenses)} new items to Expenses!")
-                st.cache_data.clear()
-                st.rerun()
-            else:
-                st.info("Everything is up to date! No new bookings needed syncing.")
 
         # 5. LOCATION MAP
         st.divider()
@@ -199,7 +197,7 @@ with tab1:
         
     except Exception as e:
         st.error(f"Robot can't read the 'Planner' tab. Error: {e}")
-# --- TAB 2: EXPENSES ---
+        # --- TAB 2: EXPENSES ---
 with tab2:
     st.subheader("💰 Expense Manager")
 
