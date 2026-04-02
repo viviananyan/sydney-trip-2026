@@ -244,4 +244,19 @@ with tab3:
                 bal = balances[user]
                 if bal > 0.01:
                     status = "🟢 To receive"
-                elif bal
+                elif bal < -0.01:
+                    status = "🔴 To pay"
+                else:
+                    status = "⚪ Settled"
+                    
+                summary_data.append({
+                    "Person": user,
+                    "Total Paid": f"${total_paid[user]:.2f}",
+                    "Balance": f"${abs(bal):.2f}",
+                    "Status": status
+                })
+            
+            st.table(summary_data)
+            
+    except Exception as e:
+        st.error(f"Financial Robot hit a snag: {e}")
