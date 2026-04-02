@@ -421,7 +421,7 @@ with tab2:
                         st.write("All Settled!")
 
         else:
-            st.success("🎉 冇拖冇欠啦！")
+            st.success("🎉 All debts are settled!")
             
     except Exception as e:
          st.error(f"Robot can't read the 'Expenses' tab. Error: {e}")
