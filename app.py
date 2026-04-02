@@ -53,16 +53,14 @@ tab1, tab2 = st.tabs(["🗓️ Planner & Map", "💰 Expenses"])
 with tab1:
     st.subheader("🗓️ Trip Itinerary")
     
-    # Expanded to 14 days for your whole trip!
     days = [f"Day {i}" for i in range(1, 15)]
 
     try:
         df_plan = conn.read(spreadsheet=url, worksheet="Planner", ttl=60)
         
-        # 1. REMOVED 'Transport' from the required columns
+        # 1. STRIPPED DOWN COLUMNS: No more Sync or Booking columns
         required_planner_cols = [
-            'Day', 'Start Time', 'End Time', 'Location', 'Activity', 
-            'Needs Booking', 'Sent to Expenses'
+            'Day', 'Start Time', 'End Time', 'Location', 'Activity'
         ]
         
         for col in required_planner_cols:
@@ -74,31 +72,25 @@ with tab1:
         # 2. THE CLEANING STATION
         df_plan = df_plan.dropna(how="all")
         
-        df_plan['Needs Booking'] = df_plan['Needs Booking'].fillna(False).astype(bool)
-        df_plan['Sent to Expenses'] = df_plan['Sent to Expenses'].fillna(False).astype(bool)
-        
-        # We removed the complex Time Parser! Everything is just easy-to-type text now.
         for col in ['Start Time', 'End Time', 'Day', 'Location', 'Activity']:
             df_plan[col] = df_plan[col].fillna("").astype(str)
             df_plan[col] = df_plan[col].replace("nan", "")
             
-        # Sort the table chronologically
         df_plan = df_plan.sort_values(by=['Day', 'Start Time'], na_position='last')
         
-        # 3. THE ADVANCED EDITOR
+        # 3. THE CLEAN EDITOR
         edited_plan = st.data_editor(
             df_plan, 
             num_rows="dynamic", 
             width="stretch", 
-            key="plan_editor_v4",
+            hide_index=True, # <-- THIS HIDES THE ANNOYING ROW NUMBERS!
+            key="plan_editor_v5",
             column_config={
                 "Day": st.column_config.SelectboxColumn("Day", options=days),
                 "Start Time": st.column_config.TextColumn("Start Time (e.g. 09:00)"),
                 "End Time": st.column_config.TextColumn("End Time (e.g. 11:30)"),
                 "Location": st.column_config.TextColumn("Location"),
-                "Activity": st.column_config.TextColumn("Activity"),
-                "Needs Booking": st.column_config.CheckboxColumn("Needs Booking?"),
-                "Sent to Expenses": st.column_config.CheckboxColumn("Synced?") 
+                "Activity": st.column_config.TextColumn("Activity")
             }
         )
         
@@ -127,11 +119,9 @@ with tab1:
                             start_loc = str(start_row['Location'])
                             end_loc = str(end_row['Location'])
                             
-                            # Safely encode the locations for a web URL
                             start_enc = urllib.parse.quote(f"{start_loc}, Sydney, Australia")
                             end_enc = urllib.parse.quote(f"{end_loc}, Sydney, Australia")
                             
-                            # NEW SMART URL: We removed the travel mode so Google auto-calculates the best way!
                             route_url = f"https://www.google.com/maps/dir/?api=1&origin={start_enc}&destination={end_enc}"
                             
                             col1, col2 = st.columns([3, 1])
@@ -139,44 +129,9 @@ with tab1:
                             
                             col2.link_button("🗺️ Get Route", route_url)
 
-        # 4. THE GATEKEEPER: SMART SYNC BUTTON
-        st.divider()
-        st.subheader("🤖 Smart Sync")
-        
-        if st.button("📥 Push Bookings to Expenses"):
-            new_expenses = []
-            for index, row in edited_plan.iterrows():
-                if row['Needs Booking'] == True and row['Sent to Expenses'] == False:
-                    
-                    item_name = str(row.get('Activity', '')).strip()
-                    if item_name == "" or item_name.lower() == "nan":
-                        item_name = str(row.get('Location', 'Unknown Booking')).strip()
-                        
-                    new_expenses.append({
-                        'Date': '',
-                        'Category': '🎟️ Activity',
-                        'Item': item_name,
-                        'Cost': 0.0,
-                        'Paid By': 'Sally🦕',
-                        'Split By': 'All',
-                        'Remark': 'Auto-synced from Planner'
-                    })
-                    edited_plan.at[index, 'Sent to Expenses'] = True
-                    
-            if len(new_expenses) > 0:
-                conn.update(spreadsheet=url, data=edited_plan, worksheet="Planner")
-                import pandas as pd
-                df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=0)
-                df_exp_new = pd.concat([df_exp, pd.DataFrame(new_expenses)], ignore_index=True)
-                conn.update(spreadsheet=url, data=df_exp_new, worksheet="Expenses")
-                
-                st.success(f"🎉 Successfully pushed {len(new_expenses)} items to Expenses!")
-                st.cache_data.clear()
-                st.rerun()
-            else:
-                st.info("Everything is up to date! No new bookings to sync.")
+        # (SMART SYNC COMPLETELY DELETED FROM HERE)
 
-        # 5. LOCATION MAP
+        # 4. LOCATION MAP
         st.divider()
         st.subheader("📍 Location Map")
         m = folium.Map(location=[-33.8688, 151.2093], zoom_start=11)
