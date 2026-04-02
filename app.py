@@ -115,10 +115,10 @@ with tab1:
         )
         
         if st.button("Save Plan"):
-        # --- PHASE 2: DYNAMIC GOOGLE MAPS ROUTING ---
-        st.divider()
-        st.subheader("🗺️ Daily Route Generator")
-        st.write("Click a button to open Google Maps with your pre-loaded route!")
+            # --- PHASE 2: DYNAMIC GOOGLE MAPS ROUTING ---
+            st.divider()
+            st.subheader("🗺️ Daily Route Generator")
+            st.write("Click a button to open Google Maps with your pre-loaded route!")
 
         if not edited_plan.empty:
             # Look at the days we actually have planned
