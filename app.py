@@ -70,28 +70,28 @@ with tab1:
             if col not in df_plan.columns:
                 df_plan[col] = None
         
-        # Keep only required columns to tidy up the view
         df_plan = df_plan[required_planner_cols]
                 
         # 2. THE CLEANING STATION
         df_plan = df_plan.dropna(how="all")
         
-        # Booleans for our checkboxes
         df_plan['Needs Booking'] = df_plan['Needs Booking'].fillna(False).astype(bool)
         df_plan['Sent to Expenses'] = df_plan['Sent to Expenses'].fillna(False).astype(bool)
         
-        # Time Parser
+        # BULLETPROOF TIME PARSER
         import pandas as pd
         for col in ['Start Time', 'End Time']:
-            df_plan[col] = pd.to_datetime(df_plan[col], format='%H:%M', errors='ignore')
-            df_plan[col] = pd.to_datetime(df_plan[col], errors='coerce').dt.time
+            # Convert text to datetime, turning bad/empty data into NaT
+            dt_col = pd.to_datetime(df_plan[col].astype(str), errors='coerce')
+            # Extract time and convert NaT strictly to Python's 'None' to prevent Streamlit crashes
+            df_plan[col] = dt_col.dt.time.apply(lambda x: x if pd.notna(x) else None)
             
         # Text columns
         for col in ['Day', 'Location', 'Activity', 'Transport']:
             df_plan[col] = df_plan[col].fillna("").astype(str)
             df_plan[col] = df_plan[col].replace("nan", "")
             
-        # Optional: Sort the table so Day 1 is always at the top!
+        # Sort the table chronologically
         df_plan = df_plan.sort_values(by=['Day', 'Start Time'], na_position='last')
         
         # 3. THE ADVANCED EDITOR
@@ -99,7 +99,7 @@ with tab1:
             df_plan, 
             num_rows="dynamic", 
             width="stretch", 
-            key="plan_editor_v2",
+            key="plan_editor_v3",
             column_config={
                 "Day": st.column_config.SelectboxColumn("Day", options=days),
                 "Start Time": st.column_config.TimeColumn("Start Time", format="HH:mm"),
@@ -122,20 +122,14 @@ with tab1:
         st.write("Click a button to open Google Maps with your pre-loaded route!")
 
         if not edited_plan.empty:
-            # Look at the days we actually have planned
             planned_days = edited_plan['Day'].unique()
             
             for day in sorted([d for d in planned_days if str(d).strip() != ""]):
-                # Get the schedule for just this one day
                 day_schedule = edited_plan[edited_plan['Day'] == day].copy()
-                
-                # Filter out rows that don't have a location
                 valid_spots = day_schedule[day_schedule['Location'].str.strip() != ""]
                 
-                # We need at least 2 spots to make a route!
                 if len(valid_spots) > 1:
                     with st.expander(f"📍 View Routes for {day}", expanded=False):
-                        # Loop through the day step-by-step
                         for i in range(len(valid_spots) - 1):
                             start_row = valid_spots.iloc[i]
                             end_row = valid_spots.iloc[i+1]
@@ -143,9 +137,8 @@ with tab1:
                             start_loc = str(start_row['Location'])
                             end_loc = str(end_row['Location'])
                             
-                            # Figure out what transport mode to tell Google
                             transport_raw = str(end_row.get('Transport', ''))
-                            gmaps_mode = "transit" # Default to public transport
+                            gmaps_mode = "transit" 
                             if "Walk" in transport_raw: gmaps_mode = "walking"
                             elif "Uber" in transport_raw or "Drive" in transport_raw: gmaps_mode = "driving"
                             
@@ -153,10 +146,9 @@ with tab1:
                             start_enc = urllib.parse.quote(f"{start_loc}, Sydney, Australia")
                             end_enc = urllib.parse.quote(f"{end_loc}, Sydney, Australia")
                             
-                            # The magic Google Maps formula (Updated with official API structure)
+                            # The CORRECT Official Google Maps API Link
                             route_url = f"https://www.google.com/maps/dir/?api=1&origin={start_enc}&destination={end_enc}&travelmode={gmaps_mode}"
                             
-                            # Display it nicely on the screen
                             col1, col2 = st.columns([3, 1])
                             col1.write(f"**{start_row.get('Activity', start_loc)}** ➡️ **{end_row.get('Activity', end_loc)}**")
                             
@@ -199,7 +191,6 @@ with tab1:
                 st.rerun()
             else:
                 st.info("Everything is up to date! No new bookings to sync.")
-
         # 5. LOCATION MAP
         st.divider()
         st.subheader("📍 Location Map")
@@ -226,8 +217,7 @@ with tab1:
         st_folium(m, width="stretch", height=400, key="trip_map")
         
     except Exception as e:
-        st.error(f"Robot can't read the 'Planner' tab. Error: {e}")
-        
+        st.error(f"Robot can't read the 'Planner' tab. Error: {e}")      
 # --- TAB 2: EXPENSES ---
 with tab2:
     st.subheader("💰 Expense Manager")
