@@ -51,35 +51,65 @@ tab1, tab2 = st.tabs(["🗓️ Planner & Map", "💰 Expenses"])
 # --- TAB 1: PLANNER & MAP ---
 with tab1:
     st.subheader("🗓️ Trip Itinerary")
+    
+    # New Configuration Lists
+    days = ["Day 1", "Day 2", "Day 3", "Day 4", "Day 5", "Day 6", "Day 7","Day 8","Day 9","Day 10","Day 11","Day 12","Day 13","Day 14"]
+    transit_modes = ["🚶 Walk", "🚆 Train", "🚌 Bus", "🚕 Uber/Taxi", "⛴️ Ferry", "🚗 Drive"]
+
     try:
         df_plan = conn.read(spreadsheet=url, worksheet="Planner", ttl=60)
         
-        # 1. FORCE THE NEW COLUMNS
-        for col in ['Needs Booking', 'Sent to Expenses']:
+        # 1. FORCE ALL REQUIRED COLUMNS
+        required_planner_cols = [
+            'Day', 'Start Time', 'End Time', 'Location', 'Activity', 
+            'Transport', 'Needs Booking', 'Sent to Expenses'
+        ]
+        
+        for col in required_planner_cols:
             if col not in df_plan.columns:
-                df_plan[col] = False
+                df_plan[col] = None
+        
+        # Keep only required columns to tidy up the view
+        df_plan = df_plan[required_planner_cols]
                 
         # 2. THE CLEANING STATION
         df_plan = df_plan.dropna(how="all")
         
-        # Ensure the checkboxes act like booleans (True/False)
+        # Booleans for our checkboxes
         df_plan['Needs Booking'] = df_plan['Needs Booking'].fillna(False).astype(bool)
         df_plan['Sent to Expenses'] = df_plan['Sent to Expenses'].fillna(False).astype(bool)
         
-        # Force everything else to be text
-        for col in df_plan.columns:
-            if col not in ['Needs Booking', 'Sent to Expenses']:
-                df_plan[col] = df_plan[col].fillna("").astype(str)
+        # Time Parser: Converts Google Sheet strings (like "09:00") into actual Time Objects for Streamlit
+        import pandas as pd
+        for col in ['Start Time', 'End Time']:
+            df_plan[col] = pd.to_datetime(df_plan[col], format='%H:%M', errors='ignore')
+            # Fallback to coerce if the above fails, extracting just the time
+            df_plan[col] = pd.to_datetime(df_plan[col], errors='coerce').dt.time
+            
+        # Text columns
+        for col in ['Day', 'Location', 'Activity', 'Transport']:
+            df_plan[col] = df_plan[col].fillna("").astype(str)
+            # Clean up the weird 'nan' string that sometimes appears
+            df_plan[col] = df_plan[col].replace("nan", "")
+            
+        # Optional: Sort the table so Day 1 is always at the top!
+        df_plan = df_plan.sort_values(by=['Day', 'Start Time'], na_position='last')
         
-        # 3. THE EDITOR
+        # 3. THE ADVANCED EDITOR
         edited_plan = st.data_editor(
             df_plan, 
             num_rows="dynamic", 
             width="stretch", 
-            key="plan_editor",
+            key="plan_editor_v2",
             column_config={
+                "Day": st.column_config.SelectboxColumn("Day", options=days),
+                "Start Time": st.column_config.TimeColumn("Start Time", format="HH:mm"),
+                "End Time": st.column_config.TimeColumn("End Time", format="HH:mm"),
+                "Location": st.column_config.TextColumn("Location"),
+                "Activity": st.column_config.TextColumn("Activity"),
+                "Transport": st.column_config.SelectboxColumn("Transport", options=transit_modes),
                 "Needs Booking": st.column_config.CheckboxColumn("Needs Booking?"),
-                "Sent to Expenses": st.column_config.CheckboxColumn("Synced?") # Disabled so you can't accidentally click it manually!
+                "Sent to Expenses": st.column_config.CheckboxColumn("Synced?") 
             }
         )
         
@@ -94,44 +124,33 @@ with tab1:
         
         if st.button("📥 Push Bookings to Expenses"):
             new_expenses = []
-            
-            # Scan the planner for unsynced bookings
             for index, row in edited_plan.iterrows():
                 if row['Needs Booking'] == True and row['Sent to Expenses'] == False:
                     
-                    # Try to get the Activity name, or fallback to Location
                     item_name = str(row.get('Activity', '')).strip()
                     if item_name == "" or item_name.lower() == "nan":
                         item_name = str(row.get('Location', 'Unknown Booking')).strip()
                         
-                    # Build the new Expense receipt!
                     new_expenses.append({
                         'Date': '',
                         'Category': '🎟️ Activity',
                         'Item': item_name,
                         'Cost': 0.0,
-                        'Paid By': 'Sally🦕', # Default filler
+                        'Paid By': 'Sally🦕',
                         'Split By': 'All',
                         'Remark': 'Auto-synced from Planner'
                     })
-                    
-                    # Mark as sent in the Planner so it doesn't duplicate next time
                     edited_plan.at[index, 'Sent to Expenses'] = True
                     
-            # If we found items to sync, let's update the databases
             if len(new_expenses) > 0:
-                # First, save the "Sent" checkmarks to the Planner
                 conn.update(spreadsheet=url, data=edited_plan, worksheet="Planner")
-                
-                # Second, grab the live Expenses sheet, add the new rows, and save it
-                import pandas as pd # Just making sure pandas is ready
                 df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=0)
                 df_exp_new = pd.concat([df_exp, pd.DataFrame(new_expenses)], ignore_index=True)
                 conn.update(spreadsheet=url, data=df_exp_new, worksheet="Expenses")
                 
                 st.success(f"🎉 Successfully pushed {len(new_expenses)} items to Expenses!")
-                st.cache_data.clear() # Wipe the robot's memory so it sees the updates
-                st.rerun() # Refresh the page automatically
+                st.cache_data.clear()
+                st.rerun()
             else:
                 st.info("Everything is up to date! No new bookings to sync.")
 
