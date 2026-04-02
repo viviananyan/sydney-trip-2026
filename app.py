@@ -144,8 +144,8 @@ with tab2:
 with tab3:
     st.subheader("💰 Expense Manager")
     
-    # 1. CONFIGURATION (Update these names!)
-    users = ["User 1", "User 2", "User 3"] 
+    # 1. CONFIGURATION (Updated with your custom names!)
+    users = ["Sally🦕", "Suri🐶", "Bobo🍔"] 
     categories = ["🍔 Food", "🚗 Transport", "🏨 Hotel", "🎟️ Activity", "🛍️ Shopping", "✨ Other"]
     
     # Auto-generate dropdown combinations for 3 people
@@ -160,7 +160,7 @@ with tab3:
     try:
         df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=60)
         
-        # 2. FORCE COLUMNS (Now including 'Split By')
+        # 2. FORCE COLUMNS 
         required_cols = ['Date', 'Category', 'Item', 'Cost', 'Paid By', 'Split By', 'Remark']
         for col in required_cols:
             if col not in df_exp.columns:
@@ -187,7 +187,7 @@ with tab3:
             df_exp, 
             num_rows="dynamic", 
             width="stretch", 
-            key="exp_editor_v5", 
+            key="exp_editor_v6", 
             column_config={
                 "Date": st.column_config.DateColumn("Date", format="DD/MM/YYYY"),
                 "Category": st.column_config.SelectboxColumn("Category", options=categories),
@@ -212,53 +212,4 @@ with tab3:
             
             # Setup tracking dictionaries
             balances = {u: 0.0 for u in users}
-            total_paid = {u: 0.0 for u in users}
-            
-            # Read every single receipt one by one
-            for index, row in edited_exp.iterrows():
-                cost = float(row.get('Cost', 0.0))
-                paid_by = str(row.get('Paid By', '')).strip()
-                split_val = str(row.get('Split By', 'All')).strip()
-                
-                if cost > 0 and paid_by in users:
-                    # Credit the person who paid out of pocket
-                    total_paid[paid_by] += cost
-                    balances[paid_by] += cost
-                    
-                    # Figure out who shares this specific bill
-                    if split_val == "All" or split_val == "None":
-                        debtors = users
-                    else:
-                        # Find exactly which names are in the dropdown string
-                        debtors = [u for u in users if u in split_val]
-                        if not debtors: # Fallback if something goes wrong
-                            debtors = users
-                            
-                    # Debit the fraction from everyone involved
-                    split_cost = cost / len(debtors)
-                    for d in debtors:
-                        balances[d] -= split_cost
-            
-            # Display the final math
-            summary_data = []
-            for user in users:
-                bal = balances[user]
-                # Allow a tiny margin for rounding errors (1 cent)
-                if bal > 0.01:
-                    status = "🟢 To receive"
-                elif bal < -0.01:
-                    status = "🔴 To pay"
-                else:
-                    status = "⚪ Settled"
-                    
-                summary_data.append({
-                    "Person": user,
-                    "Total Paid": f"${total_paid[user]:.2f}",
-                    "Balance": f"${abs(bal):.2f}",
-                    "Status": status
-                })
-            
-            st.table(summary_data)
-            
-    except Exception as e:
-        st.error(f"Financial Robot hit a snag: {e}")
+            total_paid = {u: 0.0 for
