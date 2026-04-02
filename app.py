@@ -137,36 +137,44 @@ with tab2:
 with tab3:
     st.subheader("💰 Expense Manager")
     
+    # Update these names to match your travel group!
     users = ["User 1", "User 2", "User 3"] 
     categories = ["🍔 Food", "🚗 Transport", "🏨 Hotel", "🎟️ Activity", "🛍️ Shopping", "✨ Other"]
 
     try:
-        # THE FIX: ttl=0 forces the robot to ignore its memory and read the live sheet
+        # Read live data (ttl=0 avoids the "old photo" problem)
         df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=0)
         
-        # 1. THE "FORCE COLUMNS" BLOCK
-        # This manually injects the columns if the Robot is being blind to them
+        # 1. FORCE COLUMNS (Ensures new columns show up immediately)
         required_cols = ['Date', 'Category', 'Item', 'Cost', 'Paid By', 'Remark']
         for col in required_cols:
             if col not in df_exp.columns:
-                df_exp[col] = None # Add the missing column as empty
+                df_exp[col] = None
         
-        # Re-order the columns so they show up in the order WE want
+        # Keep only our required columns in order
         df_exp = df_exp[required_cols]
 
-        # 2. DATA CLEANING (As before)
+        # 2. DATA CLEANING & TYPE CONVERSION
         df_exp = df_exp.dropna(how="all")
+        
+        # Convert Date string to a Calendar object
         if 'Date' in df_exp.columns:
             df_exp['Date'] = pd.to_datetime(df_exp['Date'], errors='coerce').dt.date
+            
+        # Convert Cost to a number
         if 'Cost' in df_exp.columns:
             df_exp['Cost'] = pd.to_numeric(df_exp['Cost'], errors='coerce').fillna(0.0)
             
-        # 3. THE EDITOR
+        # Ensure text columns are actually strings
+        for col in ['Category', 'Item', 'Paid By', 'Remark']:
+            df_exp[col] = df_exp[col].fillna("").astype(str)
+
+        # 3. THE ADVANCED EDITOR
         edited_exp = st.data_editor(
             df_exp, 
             num_rows="dynamic", 
             width="stretch", 
-            key="exp_editor_v4", # Changed key to force a fresh UI render
+            key="exp_editor_final", 
             column_config={
                 "Date": st.column_config.DateColumn("Date", format="DD/MM/YYYY"),
                 "Category": st.column_config.SelectboxColumn("Category", options=categories),
@@ -178,7 +186,41 @@ with tab3:
         
         if st.button("Save All Changes"):
             conn.update(spreadsheet=url, data=edited_exp, worksheet="Expenses")
-            st.success("Expenses updated!")
-            # Note: After saving, the app might need one more refresh to show the new math
+            st.success("Expenses updated and synced!")
+
+        # 4. FINANCIAL OVERVIEW & SETTLEMENT
+        st.divider()
+        if not edited_exp.empty:
+            total_spend = edited_exp['Cost'].sum()
             
-        # ... (Settlement Table code stays the same below)
+            col1, col2 = st.columns(2)
+            col1.metric("Total Trip Spend", f"${total_spend:.2f} AUD")
+            col2.metric("Per Person", f"${total_spend/len(users):.2f} AUD")
+
+            st.write("### 💸 Who Owes Who")
+            
+            # Calculate what each person PAID
+            paid_summary = edited_exp.groupby('Paid By')['Cost'].sum().reindex(users, fill_value=0)
+            
+            # What each person SHOULD HAVE paid
+            fair_share = total_spend / len(users)
+            
+            summary_data = []
+            for user in users:
+                amount_paid = paid_summary[user]
+                balance = amount_paid - fair_share
+                
+                # Green if they overpaid (owe them money), Red if they underpaid
+                status = "🟢 To receive" if balance > 0 else "🔴 To pay"
+                
+                summary_data.append({
+                    "Person": user,
+                    "Total Paid": f"${amount_paid:.2f}",
+                    "Balance": f"${abs(balance):.2f}",
+                    "Status": status
+                })
+            
+            st.table(summary_data)
+            
+    except Exception as e:
+        st.error(f"Financial Robot hit a snag: {e}")
