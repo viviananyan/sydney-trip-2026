@@ -54,7 +54,7 @@ with tab1:
     st.subheader("🗓️ Trip Itinerary")
     
     # New Configuration Lists
-    days = ["Day 1", "Day 2", "Day 3", "Day 4", "Day 5", "Day 6", "Day 7"]
+    days = [f"Day {i}" for i in range(1, 15)] # This dynamically creates Day 1 through Day 14!]
     transit_modes = ["🚶 Walk", "🚆 Train", "🚌 Bus", "🚕 Uber/Taxi", "⛴️ Ferry", "🚗 Drive"]
 
     try:
