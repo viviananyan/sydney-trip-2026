@@ -1,21 +1,25 @@
 import urllib.parse
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
-import pandas as pd
 import folium
 from streamlit_folium import st_folium
 from geopy.geocoders import ArcGIS
 import requests
+import pandas as pd
+import datetime
 
-@st.cache_data(ttl=3600) # Caches the rate for 1 hour to keep the app fast
-def get_exchange_rate():
+@st.cache_data(ttl=3600) 
+def get_aud_to_hkd_rate():
     try:
-        # Free API, no key required!
-        url = "https://open.er-api.com/v6/latest/HKD"
+        # Flipping the API so we get how much 1 AUD costs in HKD
+        url = "https://open.er-api.com/v6/latest/AUD"
         data = requests.get(url).json()
-        return data['rates']['AUD'] # Returns exactly how much 1 HKD is in AUD
+        return data['rates']['HKD']
     except:
-        return 0.19 # A safe, hardcoded fallback just in case the API goes down
+        return 5.15 # Safe fallback if the API is offline
+        # --- CONFIGURATION (UPDATE THESE WITH YOUR ACTUAL FRIENDS' NAMES!) ---
+trip_users = ["Sally🦕", "Suri🐶", "Bobo🍔"]
+expense_categories = ["🎟️ Activity", "🍔 Food", "🏠 Stay", "✈️ Flight", "🚗 Transport", "🛍️ Shopping", "💡 Other"]
 
 st.set_page_config(page_title="Syd/Melb 2026", page_icon="🦘", layout="wide")
 
@@ -135,7 +139,7 @@ with tab1:
                             'Item': item_name,
                             'Currency': 'AUD', # <-- NEW
                             'Cost': 0.0,
-                            'Paid By': 'Sally🦕',
+                            'Paid By': '',
                             'Split By': 'All',
                             'Settled': False,  # <-- NEW
                             'Remark': 'Auto-synced from Planner'
@@ -210,18 +214,18 @@ with tab1:
         
     except Exception as e:
         st.error(f"Robot can't read the 'Planner' tab. Error: {e}")
-        # --- TAB 2: EXPENSES & DEBTS ---
+        import requests
+
+# --- TAB 2: EXPENSES & DEBTS ---
 with tab2:
     st.subheader("💸 Expense Tracker")
     
-    # Fetch live rate
-    hkd_to_aud = get_exchange_rate()
-    st.caption(f"💱 **Live Exchange Rate:** 1 HKD = {hkd_to_aud:.4f} AUD")
+    aud_to_hkd = get_aud_to_hkd_rate()
+    st.caption(f"💱 **Live Exchange Rate:** 1 AUD = {aud_to_hkd:.2f} HKD")
 
     try:
         df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=60)
         
-        # 1. FORCE NEW COLUMNS (App will auto-create these in your Google Sheet)
         required_exp_cols = [
             'Date', 'Category', 'Item', 'Currency', 'Cost', 
             'Paid By', 'Split By', 'Settled', 'Remark'
@@ -232,60 +236,85 @@ with tab2:
                 if col == 'Currency': df_exp[col] = "AUD"
                 elif col == 'Settled': df_exp[col] = False
                 elif col == 'Cost': df_exp[col] = 0.0
-                else: df_exp[col] = ""
+                else: df_exp[col] = None
 
         df_exp = df_exp[required_exp_cols]
         df_exp = df_exp.dropna(how="all")
         
-        # Format the data types
+        # FORMATTING DATA TYPES (This fixes the calendar widget!)
+        df_exp['Date'] = pd.to_datetime(df_exp['Date'], errors='coerce').dt.date
         df_exp['Settled'] = df_exp['Settled'].fillna(False).astype(bool)
         df_exp['Cost'] = pd.to_numeric(df_exp['Cost'], errors='coerce').fillna(0.0)
-        df_exp['Currency'] = df_exp['Currency'].replace("", "AUD") # Default to AUD
+        df_exp['Currency'] = df_exp['Currency'].replace("", "AUD") 
+        
+        # Calculate HKD equivalent for EVERYTHING in the background
+        def normalize_to_hkd(row):
+            if row['Currency'] == 'AUD':
+                return row['Cost'] * aud_to_hkd
+            return row['Cost']
+            
+        df_exp['Cost_HKD'] = df_exp.apply(normalize_to_hkd, axis=1)
 
-        # 2. THE EDITOR
+        # --- TRIP OVERVIEW METRICS ---
+        total_trip_cost = df_exp['Cost_HKD'].sum()
+        total_settled = df_exp[df_exp['Settled'] == True]['Cost_HKD'].sum()
+        total_unsettled = total_trip_cost - total_settled
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Trip Cost", f"${total_trip_cost:,.2f} HKD")
+        col2.metric("Unsettled Debts", f"${total_unsettled:,.2f} HKD")
+        col3.metric("Already Settled", f"${total_settled:,.2f} HKD")
+        st.divider()
+
+        # --- THE EDITOR ---
+        st.write("**Ledger**")
+        
+        # Toggle to show/hide the HKD conversion column for your friends
+        show_hkd_column = st.toggle("Show HKD Conversions in Ledger", value=False)
+        
+        # Determine which columns to show in the editor
+        display_cols = required_exp_cols + (['Cost_HKD'] if show_hkd_column else [])
+
         edited_exp = st.data_editor(
-            df_exp, 
+            df_exp[display_cols], 
             num_rows="dynamic", 
             width="stretch", 
             hide_index=True,
             column_config={
+                "Date": st.column_config.DateColumn("Date", format="YYYY-MM-DD"),
+                "Category": st.column_config.SelectboxColumn("Category", options=expense_categories),
                 "Currency": st.column_config.SelectboxColumn("Currency", options=["AUD", "HKD"]),
                 "Cost": st.column_config.NumberColumn("Cost", format="%.2f"),
+                "Cost_HKD": st.column_config.NumberColumn("Est. HKD", format="%.2f", disabled=True), # Read-only!
+                "Paid By": st.column_config.SelectboxColumn("Paid By", options=trip_users),
+                "Split By": st.column_config.SelectboxColumn("Split By", options=["All"] + trip_users),
                 "Settled": st.column_config.CheckboxColumn("Settled? ✅")
             }
         )
         
         if st.button("💾 Save Expenses"):
-            conn.update(spreadsheet=url, data=edited_exp, worksheet="Expenses")
+            # We strip out the temporary 'Cost_HKD' column before saving back to Google Sheets
+            clean_save_df = edited_exp.drop(columns=['Cost_HKD'], errors='ignore')
+            conn.update(spreadsheet=url, data=clean_save_df, worksheet="Expenses")
             st.success("Expenses Saved!")
             st.cache_data.clear()
             st.rerun()
 
-        # 3. SMART DEBT CALCULATOR
+        # --- SMART DEBT CALCULATOR ---
         st.divider()
-        st.subheader("⚖️ Outstanding Balances (in AUD)")
+        st.subheader("⚖️ Active Debts (in HKD)")
         
-        # Filter OUT anything that is checked as "Settled"
         active_debts = edited_exp[edited_exp['Settled'] == False].copy()
         
         if not active_debts.empty:
-            # Convert any HKD expenses into AUD for accurate splitting
-            def normalize_to_aud(row):
-                if row['Currency'] == 'HKD':
-                    return row['Cost'] * hkd_to_aud
-                return row['Cost']
-                
-            active_debts['Cost_AUD'] = active_debts.apply(normalize_to_aud, axis=1)
-            
-            # Show the active, unsettled debts converted to a single currency!
+            # We enforce that all debt tracking is shown cleanly in HKD
             st.dataframe(
-                active_debts[['Item', 'Paid By', 'Split By', 'Currency', 'Cost', 'Cost_AUD']],
-                hide_index=True
+                active_debts[['Item', 'Paid By', 'Split By', 'Cost_HKD']],
+                hide_index=True,
+                column_config={
+                    "Cost_HKD": st.column_config.NumberColumn("Amount (HKD)", format="$%.2f")
+                }
             )
-            
-            # (If you have complex logic for calculating who owes who, it goes here, 
-            # and it will now safely run using the 'active_debts' dataframe!)
-            
         else:
             st.success("🎉 All debts are settled! You guys are awesome.")
             
