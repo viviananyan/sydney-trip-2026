@@ -53,17 +53,16 @@ tab1, tab2 = st.tabs(["🗓️ Planner & Map", "💰 Expenses"])
 with tab1:
     st.subheader("🗓️ Trip Itinerary")
     
-    # New Configuration Lists
-    days = [f"Day {i}" for i in range(1, 15)] # This dynamically creates Day 1 through Day 14!]
-    transit_modes = ["🚶 Walk", "🚆 Train", "🚌 Bus", "🚕 Uber/Taxi", "⛴️ Ferry", "🚗 Drive"]
+    # Expanded to 14 days for your whole trip!
+    days = [f"Day {i}" for i in range(1, 15)]
 
     try:
         df_plan = conn.read(spreadsheet=url, worksheet="Planner", ttl=60)
         
-        # 1. FORCE ALL REQUIRED COLUMNS
+        # 1. REMOVED 'Transport' from the required columns
         required_planner_cols = [
             'Day', 'Start Time', 'End Time', 'Location', 'Activity', 
-            'Transport', 'Needs Booking', 'Sent to Expenses'
+            'Needs Booking', 'Sent to Expenses'
         ]
         
         for col in required_planner_cols:
@@ -78,16 +77,8 @@ with tab1:
         df_plan['Needs Booking'] = df_plan['Needs Booking'].fillna(False).astype(bool)
         df_plan['Sent to Expenses'] = df_plan['Sent to Expenses'].fillna(False).astype(bool)
         
-        # BULLETPROOF TIME PARSER
-        import pandas as pd
-        for col in ['Start Time', 'End Time']:
-            # Convert text to datetime, turning bad/empty data into NaT
-            dt_col = pd.to_datetime(df_plan[col].astype(str), errors='coerce')
-            # Extract time and convert NaT strictly to Python's 'None' to prevent Streamlit crashes
-            df_plan[col] = dt_col.dt.time.apply(lambda x: x if pd.notna(x) else None)
-            
-        # Text columns
-        for col in ['Day', 'Location', 'Activity', 'Transport']:
+        # We removed the complex Time Parser! Everything is just easy-to-type text now.
+        for col in ['Start Time', 'End Time', 'Day', 'Location', 'Activity']:
             df_plan[col] = df_plan[col].fillna("").astype(str)
             df_plan[col] = df_plan[col].replace("nan", "")
             
@@ -99,14 +90,13 @@ with tab1:
             df_plan, 
             num_rows="dynamic", 
             width="stretch", 
-            key="plan_editor_v3",
+            key="plan_editor_v4",
             column_config={
                 "Day": st.column_config.SelectboxColumn("Day", options=days),
-                "Start Time": st.column_config.TimeColumn("Start Time", format="HH:mm"),
-                "End Time": st.column_config.TimeColumn("End Time", format="HH:mm"),
+                "Start Time": st.column_config.TextColumn("Start Time (e.g. 09:00)"),
+                "End Time": st.column_config.TextColumn("End Time (e.g. 11:30)"),
                 "Location": st.column_config.TextColumn("Location"),
                 "Activity": st.column_config.TextColumn("Activity"),
-                "Transport": st.column_config.SelectboxColumn("Transport", options=transit_modes),
                 "Needs Booking": st.column_config.CheckboxColumn("Needs Booking?"),
                 "Sent to Expenses": st.column_config.CheckboxColumn("Synced?") 
             }
@@ -119,7 +109,7 @@ with tab1:
         # --- PHASE 2: DYNAMIC GOOGLE MAPS ROUTING ---
         st.divider()
         st.subheader("🗺️ Daily Route Generator")
-        st.write("Click a button to open Google Maps with your pre-loaded route!")
+        st.write("Click a button to let Google Maps find the best route!")
 
         if not edited_plan.empty:
             planned_days = edited_plan['Day'].unique()
@@ -137,28 +127,21 @@ with tab1:
                             start_loc = str(start_row['Location'])
                             end_loc = str(end_row['Location'])
                             
-                            transport_raw = str(end_row.get('Transport', ''))
-                            gmaps_mode = "transit" 
-                            if "Walk" in transport_raw: gmaps_mode = "walking"
-                            elif "Uber" in transport_raw or "Drive" in transport_raw: gmaps_mode = "driving"
-                            
                             # Safely encode the locations for a web URL
                             start_enc = urllib.parse.quote(f"{start_loc}, Sydney, Australia")
                             end_enc = urllib.parse.quote(f"{end_loc}, Sydney, Australia")
                             
-                            # The CORRECT Official Google Maps API Link
-                            route_url = f"https://www.google.com/maps/dir/?api=1&origin={start_enc}&destination={end_enc}&travelmode={gmaps_mode}"
+                            # NEW SMART URL: We removed the travel mode so Google auto-calculates the best way!
+                            route_url = f"https://www.google.com/maps/dir/?api=1&origin={start_enc}&destination={end_enc}"
                             
                             col1, col2 = st.columns([3, 1])
                             col1.write(f"**{start_row.get('Activity', start_loc)}** ➡️ **{end_row.get('Activity', end_loc)}**")
                             
-                            btn_icon = transport_raw.split(" ")[0] if transport_raw else "🗺️"
-                            col2.link_button(f"{btn_icon} Route", route_url)
+                            col2.link_button("🗺️ Get Route", route_url)
 
         # 4. THE GATEKEEPER: SMART SYNC BUTTON
         st.divider()
         st.subheader("🤖 Smart Sync")
-        st.write("Click below to send any checked 'Needs Booking' items to your Expenses tab.")
         
         if st.button("📥 Push Bookings to Expenses"):
             new_expenses = []
@@ -182,6 +165,7 @@ with tab1:
                     
             if len(new_expenses) > 0:
                 conn.update(spreadsheet=url, data=edited_plan, worksheet="Planner")
+                import pandas as pd
                 df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=0)
                 df_exp_new = pd.concat([df_exp, pd.DataFrame(new_expenses)], ignore_index=True)
                 conn.update(spreadsheet=url, data=df_exp_new, worksheet="Expenses")
@@ -191,10 +175,10 @@ with tab1:
                 st.rerun()
             else:
                 st.info("Everything is up to date! No new bookings to sync.")
+
         # 5. LOCATION MAP
         st.divider()
         st.subheader("📍 Location Map")
-        st.write("🕵️ **Robot's Thought Process:**")
         m = folium.Map(location=[-33.8688, 151.2093], zoom_start=11)
         
         if 'Location' in edited_plan.columns and 'Activity' in edited_plan.columns:
@@ -204,7 +188,6 @@ with tab1:
                 
                 if loc_name != "" and loc_name.lower() != "nan" and loc_name.lower() != "none":
                     coords = get_coordinates(loc_name)
-                    st.write(f"- Searching for '{loc_name}'... Coordinates: `{coords}`")
                     
                     if coords:
                         folium.Marker(
@@ -217,7 +200,7 @@ with tab1:
         st_folium(m, width="stretch", height=400, key="trip_map")
         
     except Exception as e:
-        st.error(f"Robot can't read the 'Planner' tab. Error: {e}")      
+        st.error(f"Robot can't read the 'Planner' tab. Error: {e}")
 # --- TAB 2: EXPENSES ---
 with tab2:
     st.subheader("💰 Expense Manager")
