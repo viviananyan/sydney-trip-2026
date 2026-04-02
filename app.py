@@ -137,82 +137,69 @@ with tab2:
 with tab3:
     st.subheader("💰 Expense Manager")
     
-    # --- CONFIGURATION ---
-    # EDIT THESE NAMES TO YOUR ACTUAL NAMES:
     users = ["User 1", "User 2", "User 3"] 
     categories = ["🍔 Food", "🚗 Transport", "🏨 Hotel", "🎟️ Activity", "🛍️ Shopping", "✨ Other"]
 
     try:
         df_exp = conn.read(spreadsheet=url, worksheet="Expenses")
-        
-        # 1. CLEANING
         df_exp = df_exp.dropna(how="all")
         
-        # Ensure all columns exist and are the right type
-        required_cols = ['Date', 'Category', 'Item', 'Cost', 'Paid By', 'Remark']
-        for col in required_cols:
-            if col not in df_exp.columns:
-                df_exp[col] = "" # Create it if it's missing
+        # 1. THE DATA CONVERSION STATION
+        # This is the fix! Convert the Date column to actual Python Date objects
+        if 'Date' in df_exp.columns:
+            df_exp['Date'] = pd.to_datetime(df_exp['Date'], errors='coerce').dt.date
         
-        # Force types for the editor to behave
-        df_exp['Cost'] = pd.to_numeric(df_exp['Cost'], errors='coerce').fillna(0.0)
-        df_exp['Paid By'] = df_exp['Paid By'].astype(str)
-        df_exp['Category'] = df_exp['Category'].astype(str)
+        # Force Cost to be a number
+        if 'Cost' in df_exp.columns:
+            df_exp['Cost'] = pd.to_numeric(df_exp['Cost'], errors='coerce').fillna(0.0)
+            
+        # Keep everything else as clean text
+        text_cols = ['Category', 'Item', 'Paid By', 'Remark']
+        for col in text_cols:
+            if col in df_exp.columns:
+                df_exp[col] = df_exp[col].fillna("").astype(str)
 
         # 2. THE ADVANCED EDITOR
-        st.write("💡 *Tip: Click column headers to sort!*")
         edited_exp = st.data_editor(
             df_exp, 
             num_rows="dynamic", 
             width="stretch", 
-            key="exp_editor_v2",
+            key="exp_editor_v3",
             column_config={
+                # Now that the data is 'Date' type, this config will work!
                 "Date": st.column_config.DateColumn("Date", format="DD/MM/YYYY"),
-                "Category": st.column_config.SelectboxColumn("Category", options=categories, required=True),
-                "Paid By": st.column_config.SelectboxColumn("Paid By", options=users, required=True),
+                "Category": st.column_config.SelectboxColumn("Category", options=categories),
+                "Paid By": st.column_config.SelectboxColumn("Paid By", options=users),
                 "Cost": st.column_config.NumberColumn("Cost ($)", format="$%.2f", min_value=0),
-                "Remark": st.column_config.TextColumn("Remark", help="Notes for future reference"),
+                "Remark": st.column_config.TextColumn("Remark"),
             }
         )
         
         if st.button("Save All Changes"):
             conn.update(spreadsheet=url, data=edited_exp, worksheet="Expenses")
-            st.success("Expenses updated and synced!")
+            st.success("Expenses updated!")
 
         # 3. FINANCIAL OVERVIEW
         st.divider()
-        st.subheader("📊 Settlement Summary")
-        
         if not edited_exp.empty:
             total_spend = edited_exp['Cost'].sum()
-            
             col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Total Trip Spend", f"${total_spend:.2f} AUD")
-            with col2:
-                st.metric("Per Person (Equal Split)", f"${total_spend/len(users):.2f} AUD")
+            col1.metric("Total Trip Spend", f"${total_spend:.2f} AUD")
+            col2.metric("Per Person", f"${total_spend/len(users):.2f} AUD")
 
-            # --- WHO OWES WHO LOGIC ---
-            st.write("### 💸 Current Standing")
-            # Calculate how much each person has actually paid out of pocket
+            # Settlement Table
             paid_summary = edited_exp.groupby('Paid By')['Cost'].sum().reindex(users, fill_value=0)
-            
-            # The fair share each person should have paid
             fair_share = total_spend / len(users)
             
-            # Create a summary table
             summary_data = []
             for user in users:
-                amount_paid = paid_summary[user]
-                balance = amount_paid - fair_share
-                status = "🟢 To receive" if balance > 0 else "🔴 To pay"
+                bal = paid_summary[user] - fair_share
                 summary_data.append({
                     "Person": user,
-                    "Paid Out of Pocket": f"${amount_paid:.2f}",
-                    "Balance": f"${abs(balance):.2f}",
-                    "Action": status
+                    "Paid": f"${paid_summary[user]:.2f}",
+                    "Balance": f"${abs(bal):.2f}",
+                    "Status": "🟢 To receive" if bal > 0 else "🔴 To pay"
                 })
-            
             st.table(summary_data)
 
     except Exception as e:
