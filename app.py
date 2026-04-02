@@ -213,3 +213,5 @@ with tab3:
             # Setup tracking dictionaries
             balances = {u: 0.0 for u in users}
             total_paid = {u: 0.0 for u in users}
+            
+            # Read every single receipt one by one
