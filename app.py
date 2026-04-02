@@ -43,15 +43,24 @@ tab1, tab2, tab3 = st.tabs(["🗓️ Planner & Map", "🎯 Missions", "💰 Expe
 
 # --- TAB 1: PLANNER & MAP ---
 with tab1:
-    st.subheader("Trip Itinerary")
+    st.subheader("🗓️ Trip Itinerary")
     try:
         df_plan = conn.read(spreadsheet=url, worksheet="Planner")
         
-        # Clean the data
+        # 1. THE AGGRESSIVE CLEANING STATION
         df_plan = df_plan.dropna(how="all")
-        df_plan = df_plan.fillna("") 
         
-        edited_plan = st.data_editor(df_plan, num_rows="dynamic", width="stretch", key="plan_editor")
+        # FORCE everything to be text so you can type "3/8" or emojis
+        for col in df_plan.columns:
+            df_plan[col] = df_plan[col].fillna("").astype(str)
+        
+        # 2. THE EDITOR
+        edited_plan = st.data_editor(
+            df_plan, 
+            num_rows="dynamic", 
+            width="stretch", 
+            key="plan_editor"
+        )
         
         if st.button("Save Plan"):
             conn.update(spreadsheet=url, data=edited_plan, worksheet="Planner")
@@ -60,10 +69,8 @@ with tab1:
         st.divider()
         st.subheader("📍 Location Map")
         
-        # --- THE X-RAY MACHINE ---
+        # (The rest of your map code remains the same...)
         st.write("🕵️ **Robot's Thought Process:**")
-        
-        # Center map on Sydney by default
         m = folium.Map(location=[-33.8688, 151.2093], zoom_start=11)
         
         if 'Location' in edited_plan.columns and 'Activity' in edited_plan.columns:
@@ -71,14 +78,11 @@ with tab1:
                 loc_name = str(row.get('Location', '')).strip()
                 act_name = str(row.get('Activity', '')).strip()
                 
-                # If the location isn't blank, translate it!
-                if loc_name != "" and loc_name.lower() != "nan":
+                if loc_name != "" and loc_name.lower() != "nan" and loc_name.lower() != "none":
                     coords = get_coordinates(loc_name)
+                    st.write(f"- Searching for '{loc_name}'... Coordinates: `{coords}`")
                     
-                    # THIS PRINTS THE ROBOT'S THOUGHTS ON THE SCREEN:
-                    st.write(f"- Searching for '{loc_name}'... Coordinates found: `{coords}`")
-                    
-                    if coords and isinstance(coords, list):
+                    if coords:
                         folium.Marker(
                             coords, 
                             popup=f"<b>{act_name}</b><br>{loc_name}", 
@@ -86,11 +90,10 @@ with tab1:
                             icon=folium.Icon(color="red", icon="info-sign")
                         ).add_to(m)
 
-        # Added a 'key' here to force the map to refresh properly
         st_folium(m, width="stretch", height=400, key="trip_map")
         
     except Exception as e:
-        st.error(f"Robot can't read the 'Planner' tab. The real error is: {e}")
+        st.error(f"Robot can't read the 'Planner' tab. Error: {e}")
 
 # --- TAB 2: MISSIONS ---
 with tab2:
