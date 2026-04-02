@@ -221,7 +221,13 @@ with tab2:
     st.subheader("💸 Expense Tracker")
     
     aud_to_hkd = get_aud_to_hkd_rate()
-    st.caption(f"💱 **Live Exchange Rate:** 1 AUD = {aud_to_hkd:.2f} HKD")
+    
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        st.caption(f"💱 **Live Exchange Rate:** 1 AUD = {aud_to_hkd:.2f} HKD")
+    with col2:
+        # THE NEW GLOBAL TOGGLE
+        view_in_hkd = st.toggle("🇭🇰 View all totals and debts in HKD", value=True)
 
     try:
         df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=60)
@@ -241,39 +247,46 @@ with tab2:
         df_exp = df_exp[required_exp_cols]
         df_exp = df_exp.dropna(how="all")
         
-        # FORMATTING DATA TYPES (This fixes the calendar widget!)
+        # FORMATTING DATA TYPES
         df_exp['Date'] = pd.to_datetime(df_exp['Date'], errors='coerce').dt.date
         df_exp['Settled'] = df_exp['Settled'].fillna(False).astype(bool)
         df_exp['Cost'] = pd.to_numeric(df_exp['Cost'], errors='coerce').fillna(0.0)
         df_exp['Currency'] = df_exp['Currency'].replace("", "AUD") 
         
-        # Calculate HKD equivalent for EVERYTHING in the background
-        def normalize_to_hkd(row):
-            if row['Currency'] == 'AUD':
-                return row['Cost'] * aud_to_hkd
-            return row['Cost']
+        # 1. CALCULATE BOTH CURRENCIES IN THE BACKGROUND
+        def get_hkd(row):
+            return row['Cost'] * aud_to_hkd if row['Currency'] == 'AUD' else row['Cost']
             
-        df_exp['Cost_HKD'] = df_exp.apply(normalize_to_hkd, axis=1)
+        def get_aud(row):
+            return row['Cost'] / aud_to_hkd if row['Currency'] == 'HKD' else row['Cost']
+            
+        df_exp['Cost_HKD'] = df_exp.apply(get_hkd, axis=1)
+        df_exp['Cost_AUD'] = df_exp.apply(get_aud, axis=1)
 
-        # --- TRIP OVERVIEW METRICS ---
-        total_trip_cost = df_exp['Cost_HKD'].sum()
-        total_settled = df_exp[df_exp['Settled'] == True]['Cost_HKD'].sum()
+        # 2. DYNAMIC TRIP OVERVIEW METRICS
+        if view_in_hkd:
+            total_trip_cost = df_exp['Cost_HKD'].sum()
+            total_settled = df_exp[df_exp['Settled'] == True]['Cost_HKD'].sum()
+            currency_sym = "HKD"
+        else:
+            total_trip_cost = df_exp['Cost_AUD'].sum()
+            total_settled = df_exp[df_exp['Settled'] == True]['Cost_AUD'].sum()
+            currency_sym = "AUD"
+            
         total_unsettled = total_trip_cost - total_settled
         
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Trip Cost", f"${total_trip_cost:,.2f} HKD")
-        col2.metric("Unsettled Debts", f"${total_unsettled:,.2f} HKD")
-        col3.metric("Already Settled", f"${total_settled:,.2f} HKD")
+        met1, met2, met3 = st.columns(3)
+        met1.metric("Total Trip Cost", f"${total_trip_cost:,.2f} {currency_sym}")
+        met2.metric("Unsettled Debts", f"${total_unsettled:,.2f} {currency_sym}")
+        met3.metric("Already Settled", f"${total_settled:,.2f} {currency_sym}")
         st.divider()
 
-        # --- THE EDITOR ---
+        # 3. THE SMART EDITOR
         st.write("**Ledger**")
         
-        # Toggle to show/hide the HKD conversion column for your friends
-        show_hkd_column = st.toggle("Show HKD Conversions in Ledger", value=False)
-        
-        # Determine which columns to show in the editor
-        display_cols = required_exp_cols + (['Cost_HKD'] if show_hkd_column else [])
+        # If toggled ON, add HKD column. If OFF, add AUD column.
+        calc_col = 'Cost_HKD' if view_in_hkd else 'Cost_AUD'
+        display_cols = required_exp_cols + [calc_col]
 
         edited_exp = st.data_editor(
             df_exp[display_cols], 
@@ -285,7 +298,8 @@ with tab2:
                 "Category": st.column_config.SelectboxColumn("Category", options=expense_categories),
                 "Currency": st.column_config.SelectboxColumn("Currency", options=["AUD", "HKD"]),
                 "Cost": st.column_config.NumberColumn("Cost", format="%.2f"),
-                "Cost_HKD": st.column_config.NumberColumn("Est. HKD", format="%.2f", disabled=True), # Read-only!
+                "Cost_HKD": st.column_config.NumberColumn("Est. HKD", format="%.2f", disabled=True), 
+                "Cost_AUD": st.column_config.NumberColumn("Est. AUD", format="%.2f", disabled=True), 
                 "Paid By": st.column_config.SelectboxColumn("Paid By", options=trip_users),
                 "Split By": st.column_config.SelectboxColumn("Split By", options=["All"] + trip_users),
                 "Settled": st.column_config.CheckboxColumn("Settled? ✅")
@@ -293,26 +307,26 @@ with tab2:
         )
         
         if st.button("💾 Save Expenses"):
-            # We strip out the temporary 'Cost_HKD' column before saving back to Google Sheets
-            clean_save_df = edited_exp.drop(columns=['Cost_HKD'], errors='ignore')
+            # Safely drop whichever calculated column is currently visible before saving
+            clean_save_df = edited_exp.drop(columns=['Cost_HKD', 'Cost_AUD'], errors='ignore')
             conn.update(spreadsheet=url, data=clean_save_df, worksheet="Expenses")
             st.success("Expenses Saved!")
             st.cache_data.clear()
             st.rerun()
 
-        # --- SMART DEBT CALCULATOR ---
+        # 4. SMART DEBT CALCULATOR
         st.divider()
-        st.subheader("⚖️ Active Debts (in HKD)")
+        st.subheader(f"⚖️ Active Debts (in {currency_sym})")
         
         active_debts = edited_exp[edited_exp['Settled'] == False].copy()
         
         if not active_debts.empty:
-            # We enforce that all debt tracking is shown cleanly in HKD
+            # Safely display the correct calculated column based on the toggle!
             st.dataframe(
-                active_debts[['Item', 'Paid By', 'Split By', 'Cost_HKD']],
+                active_debts[['Item', 'Paid By', 'Split By', calc_col]],
                 hide_index=True,
                 column_config={
-                    "Cost_HKD": st.column_config.NumberColumn("Amount (HKD)", format="$%.2f")
+                    calc_col: st.column_config.NumberColumn(f"Amount ({currency_sym})", format="$%.2f")
                 }
             )
         else:
