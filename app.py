@@ -277,13 +277,21 @@ with tab2:
         met2.metric("Unsettled Debts", f"${total_unsettled:,.2f} {target_currency}")
         met3.metric("Already Settled", f"${total_settled:,.2f} {target_currency}")
         
-        # New: Individual Expense Breakdown (How much of the total trip cost belongs to each person)
+        # Individual Expense Breakdown & Chart Math
         st.write("##### 🧑‍🤝‍🧑 Personal Expense Breakdown")
+        
         user_shares = {user: 0.0 for user in trip_users}
+        total_cat_shares = {}
+        user_cat_shares = {user: {} for user in trip_users}
         
         for idx, row in df_exp.iterrows():
             cost = float(row[calc_col])
+            cat = str(row['Category'])
+            
             if cost > 0:
+                # Track for Total Chart
+                total_cat_shares[cat] = total_cat_shares.get(cat, 0.0) + cost
+                
                 split_str = str(row['Split By']).strip()
                 if split_str == 'All':
                     involved = trip_users
@@ -294,12 +302,35 @@ with tab2:
                         
                 split_amount = cost / len(involved)
                 for person in involved:
+                    # Track for Individual Summary
                     user_shares[person] += split_amount
+                    # Track for Individual Chart
+                    user_cat_shares[person][cat] = user_cat_shares[person].get(cat, 0.0) + split_amount
                     
         share_cols = st.columns(len(trip_users))
         for i, user in enumerate(trip_users):
             with share_cols[i]:
                 st.info(f"**{user}**\n\n${user_shares[user]:,.2f} {target_currency}")
+
+        # --- NEW: THE CUTE SPENDING CHARTS ---
+        if st.toggle("📊 Show Spending Charts"):
+            chart_col1, chart_col2 = st.columns(2)
+            
+            with chart_col1:
+                st.write("**Total Group Spending**")
+                if total_cat_shares:
+                    df_total_chart = pd.DataFrame(list(total_cat_shares.items()), columns=['Category', 'Amount']).set_index('Category')
+                    st.bar_chart(df_total_chart, color="#ff4b4b")
+                else:
+                    st.caption("No expenses yet to chart!")
+
+            with chart_col2:
+                st.write("**Personal Spending**")
+                if any(user_shares.values()): 
+                    df_user_chart = pd.DataFrame(user_cat_shares).fillna(0)
+                    st.bar_chart(df_user_chart)
+                else:
+                    st.caption("No personal expenses yet to chart!")
 
         st.divider()
 
@@ -390,7 +421,7 @@ with tab2:
                         st.write("All Settled!")
 
         else:
-            st.success("🎉 All settled!冇拖冇欠啦！")
+            st.success("🎉 冇拖冇欠啦！")
             
     except Exception as e:
          st.error(f"Robot can't read the 'Expenses' tab. Error: {e}")
