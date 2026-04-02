@@ -221,13 +221,11 @@ with tab2:
     st.subheader("💸 Expense Tracker")
     
     aud_to_hkd = get_aud_to_hkd_rate()
-    
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        st.caption(f"💱 **Live Exchange Rate:** 1 AUD = {aud_to_hkd:.2f} HKD")
-    with col2:
-        # THE NEW GLOBAL TOGGLE
-        view_in_hkd = st.toggle("🇭🇰 View all totals and debts in HKD", value=True)
+    st.caption(f"💱 **Live Exchange Rate:** 1 AUD = {aud_to_hkd:.2f} HKD")
+
+    # --- 2A: CUSTOM OVERVIEW SECTION ---
+    st.write("### 📊 Trip Overview")
+    overview_curr = st.radio("Display overview in:", ["HKD", "AUD"], horizontal=True)
 
     try:
         df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=60)
@@ -242,54 +240,45 @@ with tab2:
                 if col == 'Currency': df_exp[col] = "AUD"
                 elif col == 'Settled': df_exp[col] = False
                 elif col == 'Cost': df_exp[col] = 0.0
+                elif col == 'Split By': df_exp[col] = "All"
                 else: df_exp[col] = None
 
         df_exp = df_exp[required_exp_cols]
         df_exp = df_exp.dropna(how="all")
         
-        # FORMATTING DATA TYPES
         df_exp['Date'] = pd.to_datetime(df_exp['Date'], errors='coerce').dt.date
         df_exp['Settled'] = df_exp['Settled'].fillna(False).astype(bool)
         df_exp['Cost'] = pd.to_numeric(df_exp['Cost'], errors='coerce').fillna(0.0)
         df_exp['Currency'] = df_exp['Currency'].replace("", "AUD") 
-        
-        # 1. CALCULATE BOTH CURRENCIES IN THE BACKGROUND
+        df_exp['Split By'] = df_exp['Split By'].replace("", "All")
+
+        # Background calculations for the overview metrics
         def get_hkd(row):
             return row['Cost'] * aud_to_hkd if row['Currency'] == 'AUD' else row['Cost']
-            
         def get_aud(row):
             return row['Cost'] / aud_to_hkd if row['Currency'] == 'HKD' else row['Cost']
             
         df_exp['Cost_HKD'] = df_exp.apply(get_hkd, axis=1)
         df_exp['Cost_AUD'] = df_exp.apply(get_aud, axis=1)
 
-        # 2. DYNAMIC TRIP OVERVIEW METRICS
-        if view_in_hkd:
-            total_trip_cost = df_exp['Cost_HKD'].sum()
-            total_settled = df_exp[df_exp['Settled'] == True]['Cost_HKD'].sum()
-            currency_sym = "HKD"
-        else:
-            total_trip_cost = df_exp['Cost_AUD'].sum()
-            total_settled = df_exp[df_exp['Settled'] == True]['Cost_AUD'].sum()
-            currency_sym = "AUD"
-            
+        # Dynamic Metrics based on radio button
+        calc_col = 'Cost_HKD' if overview_curr == "HKD" else 'Cost_AUD'
+        total_trip_cost = df_exp[calc_col].sum()
+        total_settled = df_exp[df_exp['Settled'] == True][calc_col].sum()
         total_unsettled = total_trip_cost - total_settled
         
         met1, met2, met3 = st.columns(3)
-        met1.metric("Total Trip Cost", f"${total_trip_cost:,.2f} {currency_sym}")
-        met2.metric("Unsettled Debts", f"${total_unsettled:,.2f} {currency_sym}")
-        met3.metric("Already Settled", f"${total_settled:,.2f} {currency_sym}")
+        met1.metric("Total Trip Cost", f"${total_trip_cost:,.2f} {overview_curr}")
+        met2.metric("Unsettled Debts", f"${total_unsettled:,.2f} {overview_curr}")
+        met3.metric("Already Settled", f"${total_settled:,.2f} {overview_curr}")
         st.divider()
 
-        # 3. THE SMART EDITOR
-        st.write("**Ledger**")
-        
-        # If toggled ON, add HKD column. If OFF, add AUD column.
-        calc_col = 'Cost_HKD' if view_in_hkd else 'Cost_AUD'
-        display_cols = required_exp_cols + [calc_col]
+        # --- 2B: THE CLEAN LEDGER ---
+        st.write("### 📝 Ledger")
+        st.info("💡 **Tip for Splitting:** In the 'Split By' column, type 'All' OR type names separated by commas (e.g., `Sally🦕, Suri🐶`).")
 
         edited_exp = st.data_editor(
-            df_exp[display_cols], 
+            df_exp[required_exp_cols], # Keep it clean, no disabled formula columns here!
             num_rows="dynamic", 
             width="stretch", 
             hide_index=True,
@@ -298,37 +287,81 @@ with tab2:
                 "Category": st.column_config.SelectboxColumn("Category", options=expense_categories),
                 "Currency": st.column_config.SelectboxColumn("Currency", options=["AUD", "HKD"]),
                 "Cost": st.column_config.NumberColumn("Cost", format="%.2f"),
-                "Cost_HKD": st.column_config.NumberColumn("Est. HKD", format="%.2f", disabled=True), 
-                "Cost_AUD": st.column_config.NumberColumn("Est. AUD", format="%.2f", disabled=True), 
                 "Paid By": st.column_config.SelectboxColumn("Paid By", options=trip_users),
-                "Split By": st.column_config.SelectboxColumn("Split By", options=["All"] + trip_users),
+                "Split By": st.column_config.TextColumn("Split By (e.g., All, or Sally, Suri)"),
                 "Settled": st.column_config.CheckboxColumn("Settled? ✅")
             }
         )
         
         if st.button("💾 Save Expenses"):
-            # Safely drop whichever calculated column is currently visible before saving
-            clean_save_df = edited_exp.drop(columns=['Cost_HKD', 'Cost_AUD'], errors='ignore')
-            conn.update(spreadsheet=url, data=clean_save_df, worksheet="Expenses")
+            conn.update(spreadsheet=url, data=edited_exp, worksheet="Expenses")
             st.success("Expenses Saved!")
             st.cache_data.clear()
             st.rerun()
 
-        # 4. SMART DEBT CALCULATOR
+        # --- 2C: SMART SETTLEMENT ENGINE (Splitwise Style) ---
         st.divider()
-        st.subheader(f"⚖️ Active Debts (in {currency_sym})")
+        st.subheader("⚖️ Net Balances (Who owes Whom?)")
+        st.write("Settle up whenever, in whichever currency you prefer! (Green = You are owed money / Red = You owe money)")
         
+        # We calculate debts instantly from the edited dataframe
         active_debts = edited_exp[edited_exp['Settled'] == False].copy()
         
         if not active_debts.empty:
-            # Safely display the correct calculated column based on the toggle!
-            st.dataframe(
-                active_debts[['Item', 'Paid By', 'Split By', calc_col]],
-                hide_index=True,
-                column_config={
-                    calc_col: st.column_config.NumberColumn(f"Amount ({currency_sym})", format="$%.2f")
-                }
-            )
+            # Initialize balances for everyone
+            balances = {user: {'AUD': 0.0, 'HKD': 0.0} for user in trip_users}
+            
+            for idx, row in active_debts.iterrows():
+                cost = float(row['Cost'])
+                currency = row['Currency']
+                payer = str(row['Paid By']).strip()
+                split_str = str(row['Split By']).strip()
+                
+                if cost > 0 and payer in balances:
+                    # Figure out who is involved
+                    if split_str.lower() == 'all':
+                        involved = trip_users
+                    else:
+                        # Extract names based on commas
+                        involved = [u.strip() for u in split_str.split(',') if u.strip() in trip_users]
+                        if not involved: # Fallback if typo
+                            involved = trip_users
+                            
+                    split_amount = cost / len(involved)
+                    
+                    # Payer gets credited
+                    balances[payer][currency] += cost
+                    
+                    # Everyone involved gets debited
+                    for person in involved:
+                        balances[person][currency] -= split_amount
+
+            # Display the balances cleanly
+            cols = st.columns(len(trip_users))
+            for i, user in enumerate(trip_users):
+                with cols[i]:
+                    st.write(f"**{user}**")
+                    aud_bal = balances[user]['AUD']
+                    hkd_bal = balances[user]['HKD']
+                    
+                    # Display AUD
+                    if aud_bal > 0.01:
+                        st.success(f"+ ${aud_bal:.2f} AUD")
+                    elif aud_bal < -0.01:
+                        st.error(f"- ${abs(aud_bal):.2f} AUD")
+                    else:
+                        st.write("$0.00 AUD")
+                        
+                    # Display HKD
+                    if hkd_bal > 0.01:
+                        st.success(f"+ ${hkd_bal:.2f} HKD")
+                    elif hkd_bal < -0.01:
+                        st.error(f"- ${abs(hkd_bal):.2f} HKD")
+                    else:
+                        st.write("$0.00 HKD")
+                        
+            st.caption("*To settle a debt, just have one person pay another, then check the 'Settled? ✅' boxes on the matching ledger items above and click Save!*")
+
         else:
             st.success("🎉 All debts are settled! You guys are awesome.")
             
