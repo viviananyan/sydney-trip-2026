@@ -79,7 +79,7 @@ with tab1:
             key="plan_editor",
             column_config={
                 "Needs Booking": st.column_config.CheckboxColumn("Needs Booking?"),
-                "Sent to Expenses": st.column_config.CheckboxColumn("Synced?", disabled=True) # Disabled so you can't accidentally click it manually!
+                "Sent to Expenses": st.column_config.CheckboxColumn("Synced?") # Disabled so you can't accidentally click it manually!
             }
         )
         
