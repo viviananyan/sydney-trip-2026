@@ -19,6 +19,13 @@ url = "https://docs.google.com/spreadsheets/d/17vTlewfPPS2lZainhCJgEEOkp5tJ3LDNq
 
 st.title("🇦🇺 Australia Trip Hub 2026")
 
+with st.sidebar:
+    st.header("⚙️ App Settings")
+    if st.button("🔄 Force Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
+    st.info("Data is cached for 60s to avoid Google's speed limits. Use the button above to sync manually!")
+
 # --- THE SMART MAP TRANSLATOR (ArcGIS Version) ---
 @st.cache_data(show_spinner=False)
 def get_coordinates(location_name):
@@ -45,7 +52,7 @@ tab1, tab2, tab3 = st.tabs(["🗓️ Planner & Map", "🎯 Missions", "💰 Expe
 with tab1:
     st.subheader("🗓️ Trip Itinerary")
     try:
-        df_plan = conn.read(spreadsheet=url, worksheet="Planner")
+        df_plan = conn.read(spreadsheet=url, worksheet="Planner", ttl=60)
         
         # 1. THE AGGRESSIVE CLEANING STATION
         df_plan = df_plan.dropna(how="all")
@@ -138,12 +145,12 @@ with tab3:
     st.subheader("💰 Expense Manager")
     
     # Update these names to match your travel group!
-    users = ["Sally", "Suri", "Bobo"] 
+    users = ["Sally🦕", "Suri🐶", "Bobo🍔"] 
     categories = ["🍔 Food", "🚗 Transport", "🏨 Hotel", "🎟️ Activity", "🛍️ Shopping", "✨ Other"]
 
     try:
         # Read live data (ttl=0 avoids the "old photo" problem)
-        df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=0)
+        df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=60)
         
         # 1. FORCE COLUMNS (Ensures new columns show up immediately)
         required_cols = ['Date', 'Category', 'Item', 'Cost', 'Paid By', 'Remark']
