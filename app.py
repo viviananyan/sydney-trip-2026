@@ -228,7 +228,7 @@ with tab2:
     with col1:
         st.caption(f"💱 **Live Exchange Rate:** 1 AUD = {aud_to_hkd:.2f} HKD")
     with col2:
-        target_currency = st.radio("Display Overview & Balances in:", ["HKD", "AUD"], horizontal=True)
+        target_currency = st.radio("Display Trip Overview in:", ["HKD", "AUD"], horizontal=True)
 
     try:
         df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=60)
@@ -255,7 +255,7 @@ with tab2:
         df_exp['Currency'] = df_exp['Currency'].replace("", "AUD") 
         df_exp['Split By'] = df_exp['Split By'].replace("", "All")
 
-        # Background calculations for EVERYTHING
+        # Background calculations for the Overview
         def get_hkd(row):
             return row['Cost'] * aud_to_hkd if row['Currency'] == 'AUD' else row['Cost']
         def get_aud(row):
@@ -282,7 +282,6 @@ with tab2:
         st.write("### 📝 Ledger")
         show_conversion = st.toggle(f"Show {target_currency} conversion in Ledger", value=False)
         
-        # Dynamically generate all possible user combinations for the dropdown!
         split_options = ["All"]
         for r in range(1, len(trip_users)):
             for combo in itertools.combinations(trip_users, r):
@@ -317,22 +316,29 @@ with tab2:
 
         # --- 2C: SMART SETTLEMENT ENGINE ---
         st.divider()
-        st.subheader(f"⚖️ Net Balances ({target_currency})")
-        st.write("Green = You are owed money / Red = You owe money")
+        st.subheader("⚖️ Unified Net Balances")
+        st.write("Settle up in whichever currency you prefer! (Green = You are owed money / Red = You owe money)")
         
         active_debts = edited_exp[edited_exp['Settled'] == False].copy()
         
         if not active_debts.empty:
-            # We initialize a single balance per user based on the selected target currency
-            balances = {user: 0.0 for user in trip_users}
+            # Initialize a unified balance in a base currency (AUD) for perfect math
+            balances_aud = {user: 0.0 for user in trip_users}
             
             for idx, row in active_debts.iterrows():
-                # Grab the fully converted cost from the background calculation
-                cost = float(row[calc_col]) 
+                raw_cost = float(row['Cost'])
+                currency = row['Currency']
+                
+                # Convert everything to AUD behind the scenes for unified mixing
+                if currency == 'HKD':
+                    cost_in_aud = raw_cost / aud_to_hkd
+                else:
+                    cost_in_aud = raw_cost
+                    
                 payer = str(row['Paid By']).strip()
                 split_str = str(row['Split By']).strip()
                 
-                if cost > 0 and payer in balances:
+                if cost_in_aud > 0 and payer in balances_aud:
                     if split_str == 'All':
                         involved = trip_users
                     else:
@@ -340,28 +346,29 @@ with tab2:
                         if not involved: 
                             involved = trip_users
                             
-                    split_amount = cost / len(involved)
+                    split_amount = cost_in_aud / len(involved)
                     
-                    balances[payer] += cost
+                    balances_aud[payer] += cost_in_aud
                     for person in involved:
-                        balances[person] -= split_amount
+                        balances_aud[person] -= split_amount
 
-            # Display the cleanly unified balances!
+            # Display the unified balance showing BOTH equivalents stacked!
             cols = st.columns(len(trip_users))
             for i, user in enumerate(trip_users):
                 with cols[i]:
                     st.write(f"**{user}**")
-                    net_bal = balances[user]
+                    net_aud = balances_aud[user]
+                    net_hkd = net_aud * aud_to_hkd # Calculate the exact HKD equivalent
                     
-                    if net_bal > 0.01:
-                        st.success(f"+ ${net_bal:.2f} {target_currency}")
-                    elif net_bal < -0.01:
-                        st.error(f"- ${abs(net_bal):.2f} {target_currency}")
+                    if net_aud > 0.01:
+                        st.success(f"+ ${net_aud:.2f} AUD\n\n(+ ${net_hkd:.2f} HKD)")
+                    elif net_aud < -0.01:
+                        st.error(f"- ${abs(net_aud):.2f} AUD\n\n(- ${abs(net_hkd):.2f} HKD)")
                     else:
-                        st.write(f"$0.00 {target_currency}")
+                        st.write("All Settled!")
 
         else:
-            st.success("🎉 All debts are settled!")
+            st.success("🎉 All debts are settled! You guys are awesome.")
             
     except Exception as e:
          st.error(f"Robot can't read the 'Expenses' tab. Error: {e}")
