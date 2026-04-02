@@ -144,48 +144,55 @@ with tab2:
 with tab3:
     st.subheader("💰 Expense Manager")
     
-    # Update these names to match your travel group!
-    users = ["Sally🦕", "Suri🐶", "Bobo🍔"] 
+    # 1. CONFIGURATION (Update these names!)
+    users = ["User 1", "User 2", "User 3"] 
     categories = ["🍔 Food", "🚗 Transport", "🏨 Hotel", "🎟️ Activity", "🛍️ Shopping", "✨ Other"]
+    
+    # Auto-generate dropdown combinations for 3 people
+    split_options = [
+        "All", 
+        users[0], users[1], users[2], 
+        f"{users[0]}, {users[1]}", 
+        f"{users[0]}, {users[2]}", 
+        f"{users[1]}, {users[2]}"
+    ]
 
     try:
-        # Read live data (ttl=0 avoids the "old photo" problem)
         df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=60)
         
-        # 1. FORCE COLUMNS (Ensures new columns show up immediately)
-        required_cols = ['Date', 'Category', 'Item', 'Cost', 'Paid By', 'Remark']
+        # 2. FORCE COLUMNS (Now including 'Split By')
+        required_cols = ['Date', 'Category', 'Item', 'Cost', 'Paid By', 'Split By', 'Remark']
         for col in required_cols:
             if col not in df_exp.columns:
                 df_exp[col] = None
-        
-        # Keep only our required columns in order
+                
         df_exp = df_exp[required_cols]
 
-        # 2. DATA CLEANING & TYPE CONVERSION
+        # 3. DATA CLEANING
         df_exp = df_exp.dropna(how="all")
         
-        # Convert Date string to a Calendar object
         if 'Date' in df_exp.columns:
             df_exp['Date'] = pd.to_datetime(df_exp['Date'], errors='coerce').dt.date
-            
-        # Convert Cost to a number
         if 'Cost' in df_exp.columns:
             df_exp['Cost'] = pd.to_numeric(df_exp['Cost'], errors='coerce').fillna(0.0)
             
-        # Ensure text columns are actually strings
-        for col in ['Category', 'Item', 'Paid By', 'Remark']:
+        for col in ['Category', 'Item', 'Paid By', 'Split By', 'Remark']:
             df_exp[col] = df_exp[col].fillna("").astype(str)
+            # Default empty 'Split By' to 'All'
+            if col == 'Split By':
+                df_exp[col] = df_exp[col].replace("", "All")
 
-        # 3. THE ADVANCED EDITOR
+        # 4. THE EDITOR
         edited_exp = st.data_editor(
             df_exp, 
             num_rows="dynamic", 
             width="stretch", 
-            key="exp_editor_final", 
+            key="exp_editor_v5", 
             column_config={
                 "Date": st.column_config.DateColumn("Date", format="DD/MM/YYYY"),
                 "Category": st.column_config.SelectboxColumn("Category", options=categories),
                 "Paid By": st.column_config.SelectboxColumn("Paid By", options=users),
+                "Split By": st.column_config.SelectboxColumn("Split By", options=split_options),
                 "Cost": st.column_config.NumberColumn("Cost ($)", format="$%.2f", min_value=0),
                 "Remark": st.column_config.TextColumn("Remark"),
             }
@@ -195,35 +202,59 @@ with tab3:
             conn.update(spreadsheet=url, data=edited_exp, worksheet="Expenses")
             st.success("Expenses updated and synced!")
 
-        # 4. FINANCIAL OVERVIEW & SETTLEMENT
+        # 5. THE NEW LINE-BY-LINE SETTLEMENT ENGINE
         st.divider()
         if not edited_exp.empty:
             total_spend = edited_exp['Cost'].sum()
+            st.metric("Total Trip Spend", f"${total_spend:.2f} AUD")
             
-            col1, col2 = st.columns(2)
-            col1.metric("Total Trip Spend", f"${total_spend:.2f} AUD")
-            col2.metric("Per Person", f"${total_spend/len(users):.2f} AUD")
-
             st.write("### 💸 Who Owes Who")
             
-            # Calculate what each person PAID
-            paid_summary = edited_exp.groupby('Paid By')['Cost'].sum().reindex(users, fill_value=0)
+            # Setup tracking dictionaries
+            balances = {u: 0.0 for u in users}
+            total_paid = {u: 0.0 for u in users}
             
-            # What each person SHOULD HAVE paid
-            fair_share = total_spend / len(users)
+            # Read every single receipt one by one
+            for index, row in edited_exp.iterrows():
+                cost = float(row.get('Cost', 0.0))
+                paid_by = str(row.get('Paid By', '')).strip()
+                split_val = str(row.get('Split By', 'All')).strip()
+                
+                if cost > 0 and paid_by in users:
+                    # Credit the person who paid out of pocket
+                    total_paid[paid_by] += cost
+                    balances[paid_by] += cost
+                    
+                    # Figure out who shares this specific bill
+                    if split_val == "All" or split_val == "None":
+                        debtors = users
+                    else:
+                        # Find exactly which names are in the dropdown string
+                        debtors = [u for u in users if u in split_val]
+                        if not debtors: # Fallback if something goes wrong
+                            debtors = users
+                            
+                    # Debit the fraction from everyone involved
+                    split_cost = cost / len(debtors)
+                    for d in debtors:
+                        balances[d] -= split_cost
             
+            # Display the final math
             summary_data = []
             for user in users:
-                amount_paid = paid_summary[user]
-                balance = amount_paid - fair_share
-                
-                # Green if they overpaid (owe them money), Red if they underpaid
-                status = "🟢 To receive" if balance > 0 else "🔴 To pay"
-                
+                bal = balances[user]
+                # Allow a tiny margin for rounding errors (1 cent)
+                if bal > 0.01:
+                    status = "🟢 To receive"
+                elif bal < -0.01:
+                    status = "🔴 To pay"
+                else:
+                    status = "⚪ Settled"
+                    
                 summary_data.append({
                     "Person": user,
-                    "Total Paid": f"${amount_paid:.2f}",
-                    "Balance": f"${abs(balance):.2f}",
+                    "Total Paid": f"${total_paid[user]:.2f}",
+                    "Balance": f"${abs(bal):.2f}",
                     "Status": status
                 })
             
