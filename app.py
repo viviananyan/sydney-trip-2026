@@ -144,7 +144,7 @@ with tab2:
 with tab3:
     st.subheader("💰 Expense Manager")
     
-    # 1. CONFIGURATION (Updated with your custom names!)
+    # 1. CONFIGURATION 
     users = ["Sally🦕", "Suri🐶", "Bobo🍔"] 
     categories = ["🍔 Food", "🚗 Transport", "🏨 Hotel", "🎟️ Activity", "🛍️ Shopping", "✨ Other"]
     
@@ -178,7 +178,6 @@ with tab3:
             
         for col in ['Category', 'Item', 'Paid By', 'Split By', 'Remark']:
             df_exp[col] = df_exp[col].fillna("").astype(str)
-            # Default empty 'Split By' to 'All'
             if col == 'Split By':
                 df_exp[col] = df_exp[col].replace("", "All")
 
@@ -213,3 +212,36 @@ with tab3:
             # Setup tracking dictionaries
             balances = {u: 0.0 for u in users}
             total_paid = {u: 0.0 for u in users}
+            
+            # Read every single receipt one by one
+            for index, row in edited_exp.iterrows():
+                cost = float(row.get('Cost', 0.0))
+                paid_by = str(row.get('Paid By', '')).strip()
+                split_val = str(row.get('Split By', 'All')).strip()
+                
+                if cost > 0 and paid_by in users:
+                    # Credit the person who paid out of pocket
+                    total_paid[paid_by] += cost
+                    balances[paid_by] += cost
+                    
+                    # Figure out who shares this specific bill
+                    if split_val == "All" or split_val == "None":
+                        debtors = users
+                    else:
+                        # Find exactly which names are in the dropdown string
+                        debtors = [u for u in users if u in split_val]
+                        if not debtors: 
+                            debtors = users
+                            
+                    # Debit the fraction from everyone involved
+                    split_cost = cost / len(debtors)
+                    for d in debtors:
+                        balances[d] -= split_cost
+            
+            # Display the final math
+            summary_data = []
+            for user in users:
+                bal = balances[user]
+                if bal > 0.01:
+                    status = "🟢 To receive"
+                elif bal
