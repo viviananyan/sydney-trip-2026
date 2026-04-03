@@ -66,157 +66,100 @@ def get_coordinates(location_name):
 # --- 2. CREATE THE TABS ---
 tab1, tab2 = st.tabs(["🗓️ Planner & Map", "💰 Expenses"])
 
-# --- TAB 1: PLANNER & MAP ---
+import google.generativeai as genai
+
+# Configure Gemini
+genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+model = genai.GenerativeModel('gemini-1.5-flash')
+
+# --- TAB 1: PLANNER ---
 with tab1:
-    st.subheader("🗓️ Trip Itinerary")
+    st.subheader("📍 Smart Itinerary")
     
-    days = [f"Day {i}" for i in range(1, 15)]
-
-    try:
-        df_plan = conn.read(spreadsheet=url, worksheet="Planner", ttl=60)
+    # --- AI ASSISTANT SECTION ---
+    with st.expander("✨ AI Quick Add", expanded=True):
+        col_input, col_btn = st.columns([4, 1])
+        new_spot = col_input.text_input("Where do you want to go?", placeholder="e.g. Bondi Icebergs")
         
-        required_planner_cols = [
-            'Day', 'Start Time', 'End Time', 'Location', 'Activity', 'Needs Booking'
-        ]
-        
-        for col in required_planner_cols:
-            if col not in df_plan.columns:
-                df_plan[col] = None
-        
-        df_plan = df_plan[required_planner_cols]
-        df_plan = df_plan.dropna(how="all")
-        df_plan['Needs Booking'] = df_plan['Needs Booking'].fillna(False).astype(bool)
-        
-        for col in ['Start Time', 'End Time', 'Day', 'Location', 'Activity']:
-            df_plan[col] = df_plan[col].fillna("").astype(str)
-            df_plan[col] = df_plan[col].replace("nan", "")
-            
-        df_plan = df_plan.sort_values(by=['Day', 'Start Time'], na_position='last')
-        
-        # 3. THE ADVANCED EDITOR
-        edited_plan = st.data_editor(
-            df_plan, 
-            num_rows="dynamic", 
-            width="stretch", 
-            hide_index=True,  
-            key="plan_editor_v6",
-            column_config={
-                "Day": st.column_config.SelectboxColumn("Day", options=days),
-                "Start Time": st.column_config.TextColumn("Start Time (e.g. 09:00)"),
-                "End Time": st.column_config.TextColumn("End Time (e.g. 11:30)"),
-                "Location": st.column_config.TextColumn("Location"),
-                "Activity": st.column_config.TextColumn("Activity"),
-                "Needs Booking": st.column_config.CheckboxColumn("Needs Booking?")
-            }
-        )
-        
-        # --- THE NEW "ALL-IN-ONE" SAVE & SYNC BUTTON ---
-        if st.button("💾 Save & Sync Plan"):
-            # 1. Update the Planner tab
-            conn.update(spreadsheet=url, data=edited_plan, worksheet="Planner")
-            
-            # 2. Run the Smart Sync immediately
-            import pandas as pd
-            # Use ttl=0 to force Streamlit to pull the freshest version of Expenses
-            df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=0)
-            
-            existing_items = []
-            if 'Item' in df_exp.columns:
-                # Convert everything to lowercase to prevent duplicate errors
-                existing_items = [str(x).strip().lower() for x in df_exp['Item'].fillna("").tolist()]
-
-            new_expenses = []
-            for index, row in edited_plan.iterrows():
-                if row.get('Needs Booking') == True:
-                    
-                    item_name = str(row.get('Activity', '')).strip()
-                    if not item_name or item_name.lower() == "nan":
-                        item_name = str(row.get('Location', 'Unknown Booking')).strip()
-                    
-                    # Check in lowercase to match safely!
-                    if item_name and item_name.lower() not in existing_items:
-                        new_expenses.append({
-                            'Date': '',
-                            'Category': '🎟️ Activity',
-                            'Item': item_name,
-                            'Currency': 'AUD', # <-- NEW
-                            'Cost': 0.0,
-                            'Paid By': '',
-                            'Split By': 'All',
-                            'Settled': False,  # <-- NEW
-                            'Remark': ''
-                        })
-                        # Add to our lowercase checker list to prevent duplicates in the same batch
-                        existing_items.append(item_name.lower())
-                        
-            if len(new_expenses) > 0:
-                df_exp_new = pd.concat([df_exp, pd.DataFrame(new_expenses)], ignore_index=True)
-                conn.update(spreadsheet=url, data=df_exp_new, worksheet="Expenses")
-                st.success(f"✅ Plan saved AND automatically pushed {len(new_expenses)} new bookings to Expenses!")
-            else:
-                st.success("✅ Plan saved! (No new bookings needed syncing)")
+        if col_btn.button("Magic Add") and new_spot:
+            with st.spinner(f"Gemini is researching {new_spot}..."):
+                # Fetch existing plan to help AI group things
+                current_plan_str = df_plan[['Day', 'Spot']].to_string() if not df_plan.empty else "Empty"
                 
-            # Clear cache and refresh to show the clean state
-            st.cache_data.clear()
-            st.rerun()
+                prompt = f"""
+                I am planning a trip to Australia. 
+                New Spot: {new_spot}
+                Current Plan:
+                {current_plan_str}
 
-        # --- PHASE 2: DYNAMIC GOOGLE MAPS ROUTING ---
-        st.divider()
-        st.subheader("🗺️ Daily Route Generator")
-        st.write("Click a button to let Google Maps find the best route!")
+                Task:
+                1. Determine the category (e.g., 🍴 Food, 🏖️ Nature, 🏛️ Landmark, 🛍️ Shopping).
+                2. Look at the Current Plan. Group this new spot with existing spots that are geographically close. 
+                3. If it's near spots on 'Day 1', assign it to 'Day 1'. If it's far from everything, give it a new Day.
+                4. Suggest the best time to visit.
 
-        if not edited_plan.empty:
-            planned_days = edited_plan['Day'].unique()
-            
-            for day in sorted([d for d in planned_days if str(d).strip() != ""]):
-                day_schedule = edited_plan[edited_plan['Day'] == day].copy()
-                valid_spots = day_schedule[day_schedule['Location'].str.strip() != ""]
+                Return ONLY a JSON object like this:
+                {{"category": "emoji + category", "day": "Day X", "suggested_time": "HH:MM AM/PM", "reason": "why this group?"}}
+                """
                 
-                if len(valid_spots) > 1:
-                    with st.expander(f"📍 View Routes for {day}", expanded=False):
-                        for i in range(len(valid_spots) - 1):
-                            start_row = valid_spots.iloc[i]
-                            end_row = valid_spots.iloc[i+1]
-                            
-                            start_loc = str(start_row['Location'])
-                            end_loc = str(end_row['Location'])
-                            
-                            start_enc = urllib.parse.quote(f"{start_loc}, Sydney, Australia")
-                            end_enc = urllib.parse.quote(f"{end_loc}, Sydney, Australia")
-                            
-                            route_url = f"https://www.google.com/maps/dir/?api=1&origin={start_enc}&destination={end_enc}"
-                            
-                            col1, col2 = st.columns([3, 1])
-                            col1.write(f"**{start_row.get('Activity', start_loc)}** ➡️ **{end_row.get('Activity', end_loc)}**")
-                            col2.link_button("🗺️ Get Route", route_url)
-
-
-        # 5. LOCATION MAP
-        st.divider()
-        st.subheader("📍 Location Map")
-        m = folium.Map(location=[-33.8688, 151.2093], zoom_start=11)
-        
-        if 'Location' in edited_plan.columns and 'Activity' in edited_plan.columns:
-            for index, row in edited_plan.iterrows():
-                loc_name = str(row.get('Location', '')).strip()
-                act_name = str(row.get('Activity', '')).strip()
-                
-                if loc_name != "" and loc_name.lower() != "nan" and loc_name.lower() != "none":
-                    coords = get_coordinates(loc_name)
+                try:
+                    response = model.generate_content(prompt)
+                    # Cleaning the response text to ensure it's pure JSON
+                    res_text = response.text.replace("```json", "").replace("```", "").strip()
+                    ai_data = json.loads(res_text)
                     
-                    if coords:
-                        folium.Marker(
-                            coords, 
-                            popup=f"<b>{act_name}</b><br>{loc_name}", 
-                            tooltip=act_name if act_name else loc_name,
-                            icon=folium.Icon(color="red", icon="info-sign")
-                        ).add_to(m)
+                    # Create new row
+                    new_row = {
+                        "Day": ai_data['day'],
+                        "Spot": new_spot,
+                        "Category": ai_data['category'],
+                        "Status": "Planned",
+                        "Remark": f"AI Suggestion: {ai_data['suggested_time']} - {ai_data['reason']}"
+                    }
+                    
+                    # Update Google Sheets
+                    updated_df = pd.concat([df_plan, pd.DataFrame([new_row])], ignore_index=True)
+                    conn.update(spreadsheet=url, data=updated_df, worksheet="Planner")
+                    st.success(f"Added {new_spot} to {ai_data['day']}!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"AI was a bit confused: {e}")
 
-        st_folium(m, width="stretch", height=400, key="trip_map")
-        
-    except Exception as e:
-        st.error(f"Robot can't read the 'Planner' tab. Error: {e}")
-        import requests
+    # --- THE OPTIMIZER MAGIC WAND ---
+    if not df_plan.empty:
+        if st.button("🪄 Optimize Entire Schedule"):
+            with st.spinner("Rearranging your trip for maximum efficiency..."):
+                full_plan = df_plan[['Spot', 'Remark']].to_string()
+                optimize_prompt = f"""
+                Rearrange this travel list into a logical daily itinerary based on geography (group close items) and best visit times.
+                Current List:
+                {full_plan}
+
+                Return a table-like format where you re-assign the 'Day' column for every item to minimize travel distance.
+                Format: Spot | New Day | Reasoning
+                """
+                # This is where you'd parse the full list back into the DF.
+                # For now, let's show the AI's advice:
+                advice = model.generate_content(optimize_prompt)
+                st.info("### AI Optimization Advice")
+                st.markdown(advice.text)
+
+    # --- DISPLAY THE PLAN ---
+    st.divider()
+    edited_plan = st.data_editor(
+        df_plan,
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "Day": st.column_config.SelectboxColumn("Day", options=[f"Day {i}" for i in range(1, 15)]),
+            "Category": st.column_config.TextColumn("Category (Auto)", disabled=True),
+            "Status": st.column_config.SelectboxColumn("Status", options=["Planned", "Confirmed", "Done"])
+        }
+    )
+
+    if st.button("💾 Save Changes"):
+        conn.update(spreadsheet=url, data=edited_plan, worksheet="Planner")
+        st.success("Plan saved!")
 
 # --- TAB 2: EXPENSES & DEBTS ---
 with tab2:
