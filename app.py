@@ -134,7 +134,7 @@ with tab1:
                             2. Day: Group with close items. If unsure, assign 'TBD'.
                             3. End Day: If it's a stay, infer checkout. Otherwise blank.
                             4. Time: BEST time to visit. CRITICAL: strictly use English 24-hour (e.g. 15:00) or AM/PM (e.g. 03:00 PM). NO localized text (e.g., no '下午').
-                            5. Area: General neighborhood (if applicable, else blank).
+                            5. Area: General neighborhood. IF it is a flight or train, format it as "Origin ✈️ Destination" (e.g., "SYD ✈️ MEL").
                             6. Link: A highly relevant URL (Google Maps for spots, Wikipedia for landmarks, etc).
                             7. Remark: Maximum 3 words, or blank.
 
@@ -360,7 +360,7 @@ with tab2:
         df_exp['Currency'] = df_exp['Currency'].replace("", "AUD") 
         df_exp['Split By'] = df_exp['Split By'].replace("", "All")
 
-        # --- 1. BACKGROUND MATH (Always calculates everything) ---
+        # --- 1. BACKGROUND MATH ---
         def get_hkd(row):
             return row['Cost'] * aud_to_hkd if row['Currency'] == 'AUD' else row['Cost']
         def get_aud(row):
@@ -383,7 +383,7 @@ with tab2:
 
         calc_col = 'Cost_HKD' if target_currency == "HKD" else 'Cost_AUD'
 
-        # --- 2. FRONT-END DISPLAY MATH (Blanks out redundant conversions) ---
+        # --- 2. FRONT-END DISPLAY MATH ---
         df_exp['Display_Total_HKD'] = df_exp.apply(lambda r: r['Cost_HKD'] if r['Currency'] == 'AUD' else None, axis=1)
         df_exp['Display_Total_AUD'] = df_exp.apply(lambda r: r['Cost_AUD'] if r['Currency'] == 'HKD' else None, axis=1)
         df_exp['Display_Person_HKD'] = df_exp.apply(lambda r: r['Per_Person_HKD'] if r['Currency'] == 'AUD' else None, axis=1)
@@ -431,7 +431,7 @@ with tab2:
             with share_cols[i]:
                 st.info(f"**{user}**\n\n${user_shares[user]:,.2f} {target_currency}")
 
-        # --- THE CUTE PIE CHARTS ---
+        # --- THE PIE CHARTS ---
         show_charts = st.toggle("📈 Show Category Breakdown Charts", value=False)
         if show_charts:
             chart_col1, chart_col2 = st.columns(2)
@@ -442,6 +442,7 @@ with tab2:
                 df_total_pie = df_total_pie[df_total_pie['Amount'] > 0] 
                 
                 if not df_total_pie.empty:
+                    import plotly.express as px
                     fig_total = px.pie(df_total_pie, values='Amount', names='Category', hole=0.4)
                     fig_total.update_traces(textposition='inside', textinfo='percent+label')
                     fig_total.update_layout(showlegend=False, margin=dict(t=10, b=10, l=10, r=10), height=300)
@@ -469,6 +470,7 @@ with tab2:
         st.write("### 📝 Ledger")
         show_conversion = st.toggle(f"Show {target_currency} conversion in Ledger", value=False)
         
+        import itertools
         split_options = ["All"]
         for r in range(1, len(trip_users)):
             for combo in itertools.combinations(trip_users, r):
@@ -496,7 +498,6 @@ with tab2:
                 "Cost": st.column_config.NumberColumn("Cost", format="%.2f"),
                 "Per_Person_Cost": st.column_config.NumberColumn("Per Person", format="%.2f", disabled=True),
                 
-                # These columns will show as blank/un-editable when the currency matches
                 "Display_Total_HKD": st.column_config.NumberColumn("Est. Total HKD", format="%.2f", disabled=True),
                 "Display_Total_AUD": st.column_config.NumberColumn("Est. Total AUD", format="%.2f", disabled=True),
                 "Display_Person_HKD": st.column_config.NumberColumn("Est. Person HKD", format="%.2f", disabled=True),
@@ -508,8 +509,7 @@ with tab2:
             }
         )
         
-        if st.button("💾 Save Expenses"):
-            # Drop all math AND display columns so we don't pollute your database
+        if st.button("💾 Save Expenses", use_container_width=True):
             clean_save_df = edited_exp.drop(
                 columns=['Cost_HKD', 'Cost_AUD', 'Per_Person_Cost', 'Per_Person_HKD', 'Per_Person_AUD', 'Split_Count', 
                          'Display_Total_HKD', 'Display_Total_AUD', 'Display_Person_HKD', 'Display_Person_AUD'], 
@@ -567,6 +567,46 @@ with tab2:
                         st.success(f"+ ${net_aud:.2f} AUD\n\n(+ ${net_hkd:.2f} HKD)")
                     elif net_aud < -0.01:
                         st.error(f"- ${abs(net_aud):.2f} AUD\n\n(- ${abs(net_hkd):.2f} HKD)")
+                        
+                        # --- THE NEW SETTLEMENT BUTTON ---
+                        if st.button(f"💸 Settle {user}'s Debt", key=f"settle_{user}"):
+                            with st.spinner(f"Calculating {user}'s payments..."):
+                                import datetime
+                                x_debt = abs(net_aud)
+                                new_settlements = []
+                                
+                                # Find who is owed money and logically "pay" them
+                                for cred, cred_amt in balances_aud.items():
+                                    if cred != user and cred_amt > 0.01 and x_debt > 0.01:
+                                        pay_amt = min(x_debt, cred_amt)
+                                        
+                                        new_settlements.append({
+                                            "Date": datetime.date.today().strftime("%Y-%m-%d"),
+                                            "Category": "💡 Other",
+                                            "Item": f"🤝 Settlement: {user} paid {cred}",
+                                            "Currency": "AUD",
+                                            "Cost": pay_amt,
+                                            "Paid By": user,
+                                            "Split By": cred,
+                                            "Settled": False, # Important! Keep it active so it offsets the negative math!
+                                            "Remark": "Auto-generated"
+                                        })
+                                        
+                                        x_debt -= pay_amt
+                                        balances_aud[cred] -= pay_amt 
+                                        
+                                if new_settlements:
+                                    clean_save_df = edited_exp.drop(
+                                        columns=['Cost_HKD', 'Cost_AUD', 'Per_Person_Cost', 'Per_Person_HKD', 'Per_Person_AUD', 'Split_Count', 
+                                                 'Display_Total_HKD', 'Display_Total_AUD', 'Display_Person_HKD', 'Display_Person_AUD'], 
+                                        errors='ignore'
+                                    )
+                                    updated_exp = pd.concat([clean_save_df, pd.DataFrame(new_settlements)], ignore_index=True)
+                                    conn.update(spreadsheet=url, data=updated_exp, worksheet="Expenses")
+                                    st.success("Debt mathematically neutralized!")
+                                    st.cache_data.clear()
+                                    st.rerun()
+                                    
                     else:
                         st.write("All Settled!")
 
