@@ -538,8 +538,8 @@ with tab2:
 # --- 2B: THE CLEAN LEDGER ---
         st.write("### 📝 Ledger")
 
-with st.expander("📱 Add Expense (Mobile Friendly)", expanded=False):
-with st.form("mobile_add_exp"):
+        with st.expander("📱 Add Expense (Mobile Friendly)", expanded=False):
+            with st.form("mobile_add_exp"):
                 e_date = st.date_input("Date")
                 e_item = st.text_input("What did you buy?")
                 e_cost = st.number_input("Cost", min_value=0.0, format="%.2f")
@@ -565,7 +565,7 @@ with st.form("mobile_add_exp"):
                     st.rerun()
 
         show_conversion = st.toggle(f"Show {target_currency} conversion in Ledger", value=False)
-
+        
         # --- 2C: SMART SETTLEMENT ENGINE ---
         st.divider()
         st.subheader("⚖️ Unified Net Balances")
