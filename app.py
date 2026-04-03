@@ -82,12 +82,12 @@ model = genai.GenerativeModel('gemini-2.5-flash')
 with tab1:
     st.subheader("📍 Smart Itinerary")
     
-# 1. READ THE NEW GOOGLE SHEET SCHEMA
+    # 1. READ THE NEW GOOGLE SHEET SCHEMA
     try:
         df_plan = conn.read(spreadsheet=url, worksheet="Planner", ttl=60)
         
-        # The new super-columns
-        required_cols = ['Day', 'Time', 'Item', 'Category', 'Status', 'Cost', 'Lat', 'Lon', 'Remark']
+        # Added 'End Day' to the required columns
+        required_cols = ['Day', 'End Day', 'Time', 'Item', 'Category', 'Status', 'Cost', 'Lat', 'Lon', 'Remark']
         for col in required_cols:
             if col not in df_plan.columns:
                 if col == 'Cost': df_plan[col] = 0.0
@@ -96,22 +96,21 @@ with tab1:
         df_plan = df_plan[required_cols] 
         df_plan = df_plan.dropna(how="all")
         
-        # Force numeric columns to ACTUALLY be numbers so Streamlit doesn't panic
         df_plan['Cost'] = pd.to_numeric(df_plan['Cost'], errors='coerce').fillna(0.0)
         df_plan['Lat'] = pd.to_numeric(df_plan['Lat'], errors='coerce')
         df_plan['Lon'] = pd.to_numeric(df_plan['Lon'], errors='coerce')
         
-        # Force text columns to be strings to handle empty cells gracefully
-        for col in ['Day', 'Time', 'Item', 'Category', 'Status', 'Remark']:
+        for col in ['Day', 'End Day', 'Time', 'Item', 'Category', 'Status', 'Remark']:
             df_plan[col] = df_plan[col].fillna("").astype(str)
             
     except Exception as e:
         st.error(f"Robot can't read the 'Planner' tab. Error: {e}")
-        df_plan = pd.DataFrame(columns=['Day', 'Time', 'Item', 'Category', 'Status', 'Cost', 'Lat', 'Lon', 'Remark'])
-    # --- AI ASSISTANT SECTION (Now with GPS!) ---
+        df_plan = pd.DataFrame(columns=['Day', 'End Day', 'Time', 'Item', 'Category', 'Status', 'Cost', 'Lat', 'Lon', 'Remark'])
+
+    # --- AI ASSISTANT SECTION ---
     with st.expander("✨ AI Quick Add (Spots, Flights, Stays)", expanded=True):
         col_input, col_btn = st.columns([4, 1])
-        new_item = col_input.text_input("What are we doing or booking?", placeholder="e.g. Qantas Flight to SYD, Bondi Beach, Hilton Hotel")
+        new_item = col_input.text_input("What are we doing or booking?", placeholder="e.g. Qantas Flight to SYD, Bondi Beach, QT Bondi 3 nights")
         
         if col_btn.button("Magic Add") and new_item:
             if "GEMINI_API_KEY" not in st.secrets:
@@ -120,6 +119,7 @@ with tab1:
                 with st.spinner(f"Gemini is researching {new_item}..."):
                     current_plan_str = df_plan[['Day', 'Item']].to_string() if not df_plan.empty else "Empty"
                     
+                    # Updated prompt to include 'end_day' for stays
                     prompt = f"""
                     I am planning a trip to Australia. 
                     New Item: {new_item}
@@ -128,12 +128,13 @@ with tab1:
                     Task:
                     1. Determine the category (e.g., ✈️ Flight, 🏨 Stay, 🍴 Food, 🏖️ Nature, 🏛️ Landmark).
                     2. Look at the Current Plan. If this is a location, group it with close items. 
-                    3. If you aren't sure which day, or if it's just a general idea, assign it to 'TBD'. Otherwise assign 'Day X'.
-                    4. Suggest a logical Time (e.g., 10:00 AM) or leave blank if unknown.
-                    5. Find the exact GPS Latitude and Longitude for this place. If it's a flight, use the destination airport GPS.
+                    3. If you aren't sure which day, assign 'TBD'. Otherwise assign 'Day X'.
+                    4. If this is a hotel/stay, try to infer the checkout day based on the text (e.g., "3 nights"). If you don't know, leave end_day blank. For normal spots, leave end_day blank.
+                    5. Suggest a logical Time (e.g., 10:00 AM) or leave blank.
+                    6. Find the exact GPS Latitude and Longitude for this place.
 
                     Return ONLY a JSON object exactly like this:
-                    {{"category": "emoji + category", "day": "Day X or TBD", "time": "HH:MM AM", "lat": float, "lon": float, "reason": "why this group?"}}
+                    {{"category": "emoji + category", "day": "Day X or TBD", "end_day": "Day Y or blank", "time": "HH:MM AM", "lat": float, "lon": float, "reason": "why this group?"}}
                     """
                     
                     try:
@@ -144,6 +145,7 @@ with tab1:
                         
                         new_row = pd.DataFrame([{
                             "Day": ai_data['day'],
+                            "End Day": ai_data.get('end_day', ''),
                             "Time": ai_data.get('time', ''),
                             "Item": new_item,
                             "Category": ai_data['category'],
@@ -156,7 +158,7 @@ with tab1:
                         
                         updated_df = pd.concat([df_plan, new_row], ignore_index=True)
                         conn.update(spreadsheet=url, data=updated_df, worksheet="Planner")
-                        st.success(f"Added {new_item} to {ai_data['day']}!")
+                        st.success(f"Added {new_item}!")
                         st.cache_data.clear()
                         st.rerun()
                     except Exception as e:
@@ -166,8 +168,8 @@ with tab1:
     st.divider()
     st.write("### 📝 Master Itinerary")
     
-    # We create dropdown options that include TBD and Day 1-14
-    day_options = ["TBD"] + [f"Day {i}" for i in range(1, 15)]
+    # Dropdown options for days
+    day_options = ["TBD", ""] + [f"Day {i}" for i in range(1, 15)]
     
     edited_plan = st.data_editor(
         df_plan,
@@ -175,10 +177,11 @@ with tab1:
         use_container_width=True,
         hide_index=True,
         column_config={
-            "Day": st.column_config.SelectboxColumn("Day", options=day_options),
-            "Time": st.column_config.TextColumn("Time (e.g. 10:00 AM)"),
+            "Day": st.column_config.SelectboxColumn("Start Day", options=day_options, width="small"),
+            "End Day": st.column_config.SelectboxColumn("End Day (Stays)", options=day_options, width="small"),
+            "Time": st.column_config.TextColumn("Time", width="small"),
             "Item": st.column_config.TextColumn("Item / Spot", required=True),
-            "Category": st.column_config.TextColumn("Category"),
+            "Category": st.column_config.TextColumn("Category", disabled=True),
             "Status": st.column_config.SelectboxColumn("Status", options=["Planned", "Booked", "Done"]),
             "Cost": st.column_config.NumberColumn("Est. Cost", format="$%.2f"),
             "Lat": st.column_config.NumberColumn("Latitude", disabled=True),
