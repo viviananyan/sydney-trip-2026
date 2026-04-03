@@ -212,57 +212,7 @@ with tab1:
             st.cache_data.clear()
             st.rerun()
 
-    # ==========================================
-    # SUB-TAB 2: THE VISUAL TIMELINE
-    # ==========================================
-    with tab_visual:
-        if df_plan.empty:
-            st.info("Your itinerary is empty! Use the AI Quick Add to get started.")
-        else:
-            # --- 1. THE BUCKET LIST (TBD) ---
-            tbd_items = df_plan[df_plan['Day'] == 'TBD']
-            if not tbd_items.empty:
-                st.write("### 📌 Bucket List (Unscheduled)")
-                # Show TBD items as cool little cards
-                cols = st.columns(3)
-                for i, row in tbd_items.iterrows():
-                    with cols[i % 3]:
-                        st.info(f"**{row['Category']} {row['Item']}**\n\n*Cost: ${row['Cost']}*")
-                st.divider()
-
-            # --- 2. THE SCHEDULED DAYS ---
-            st.write("### 📅 Your Schedule")
-            
-            # Helper function to sort 'Day 1', 'Day 2', 'Day 10' properly
-            def extract_day_num(day_str):
-                try:
-                    return int(str(day_str).lower().replace('day', '').strip())
-                except:
-                    return 999
-
-            # Filter out TBD and blanks, then sort
-            scheduled_df = df_plan[(df_plan['Day'] != 'TBD') & (df_plan['Day'] != '')].copy()
-            scheduled_df['Day_Num'] = scheduled_df['Day'].apply(extract_day_num)
-            scheduled_df = scheduled_df.sort_values(by=['Day_Num', 'Time'])
-
-            # Group by Day and display
-            days = scheduled_df['Day'].unique()
-            
-            for day in days:
-                with st.expander(f"📍 {day}", expanded=True):
-                    day_items = scheduled_df[scheduled_df['Day'] == day]
-                    
-                    for _, row in day_items.iterrows():
-                        time_str = f"**{row['Time']}**" if row['Time'] else "*(Anytime)*"
-                        end_str = f" ➡️ *(Ends: {row['End Day']})*" if row['End Day'] else ""
-                        status_emoji = "✅" if row['Status'] in ['Booked', 'Done'] else "⏳"
-                        
-                        st.markdown(f"{time_str} | {row['Category']} **{row['Item']}** {end_str} | {status_emoji} {row['Status']}")
-                        
-                        if row['Remark']:
-                            st.caption(f"↳ {row['Remark']}")
-
-# --- FINANCIAL SYNC (SELECTIVE) ---
+    # --- FINANCIAL SYNC (SELECTIVE) ---
         st.divider()
         st.write("### 💸 Financial Sync")
         st.caption("Check the 'Push 💸' box on any items you want to send to your Expenses sheet.")
@@ -315,7 +265,57 @@ with tab1:
                             
                 except Exception as e:
                     st.error(f"Failed to sync. Error: {e}")
-        
+
+    # ==========================================
+    # SUB-TAB 2: THE VISUAL TIMELINE
+    # ==========================================
+    with tab_visual:
+        if df_plan.empty:
+            st.info("Your itinerary is empty! Use the AI Quick Add to get started.")
+        else:
+            # --- 1. THE BUCKET LIST (TBD) ---
+            tbd_items = df_plan[df_plan['Day'] == 'TBD']
+            if not tbd_items.empty:
+                st.write("### 📌 Bucket List (Unscheduled)")
+                # Show TBD items as cool little cards
+                cols = st.columns(3)
+                for i, row in tbd_items.iterrows():
+                    with cols[i % 3]:
+                        st.info(f"**{row['Category']} {row['Item']}**\n\n*Cost: ${row['Cost']}*")
+                st.divider()
+
+            # --- 2. THE SCHEDULED DAYS ---
+            st.write("### 📅 Your Schedule")
+            
+            # Helper function to sort 'Day 1', 'Day 2', 'Day 10' properly
+            def extract_day_num(day_str):
+                try:
+                    return int(str(day_str).lower().replace('day', '').strip())
+                except:
+                    return 999
+
+            # Filter out TBD and blanks, then sort
+            scheduled_df = df_plan[(df_plan['Day'] != 'TBD') & (df_plan['Day'] != '')].copy()
+            scheduled_df['Day_Num'] = scheduled_df['Day'].apply(extract_day_num)
+            scheduled_df = scheduled_df.sort_values(by=['Day_Num', 'Time'])
+
+            # Group by Day and display
+            days = scheduled_df['Day'].unique()
+            
+            for day in days:
+                with st.expander(f"📍 {day}", expanded=True):
+                    day_items = scheduled_df[scheduled_df['Day'] == day]
+                    
+                    for _, row in day_items.iterrows():
+                        time_str = f"**{row['Time']}**" if row['Time'] else "*(Anytime)*"
+                        end_str = f" ➡️ *(Ends: {row['End Day']})*" if row['End Day'] else ""
+                        status_emoji = "✅" if row['Status'] in ['Booked', 'Done'] else "⏳"
+                        
+                        st.markdown(f"{time_str} | {row['Category']} **{row['Item']}** {end_str} | {status_emoji} {row['Status']}")
+                        
+                        if row['Remark']:
+                            st.caption(f"↳ {row['Remark']}")
+                            
 # --- TAB 2: EXPENSES & DEBTS ---
 with tab2:
     st.subheader("💸 Expense Tracker")
