@@ -72,11 +72,11 @@ import google.generativeai as genai
 # Check if the key exists before configuring
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash')
 else:
     st.error("🔑 AI Key missing! Please check your Streamlit Secrets.")
     model = None # Prevents the app from crashing later
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 # --- TAB 1: PLANNER ---
 with tab1:
