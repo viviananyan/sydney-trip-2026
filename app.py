@@ -81,26 +81,26 @@ model = genai.GenerativeModel('gemini-2.5-flash')
 # --- TAB 1: PLANNER ---
 with tab1:
     st.subheader("📍 Smart Itinerary")
-    
+
     # 1. READ THE NEW GOOGLE SHEET SCHEMA
     try:
         df_plan = conn.read(spreadsheet=url, worksheet="Planner", ttl=60)
-        
+
         # Removed Cost, changed Map Link to Link
         required_cols = ['Day', 'End Day', 'Time', 'Item', 'Area', 'Category', 'Status', 'Push to Expenses', 'Link', 'Remark']
         for col in required_cols:
             if col not in df_plan.columns:
                 if col == 'Push to Expenses': df_plan[col] = False
                 else: df_plan[col] = None
-                
+
         df_plan = df_plan[required_cols] 
         df_plan = df_plan.dropna(how="all")
-        
+
         df_plan['Push to Expenses'] = df_plan['Push to Expenses'].astype(str).str.upper().map({'TRUE': True}).fillna(False)
-        
+
         for col in ['Day', 'End Day', 'Time', 'Item', 'Area', 'Category', 'Status', 'Link', 'Remark']:
             df_plan[col] = df_plan[col].fillna("").astype(str)
-            
+
     except Exception as e:
         st.error(f"Robot can't read the 'Planner' tab. Error: {e}")
         df_plan = pd.DataFrame(columns=['Day', 'End Day', 'Time', 'Item', 'Area', 'Category', 'Status', 'Push to Expenses', 'Link', 'Remark'])
@@ -112,9 +112,9 @@ with tab1:
     # SUB-TAB 1: THE DATA EDITOR & AI TOOLS
     # ==========================================
     with tab_edit:
-        
+
         col_left, col_right = st.columns(2)
-        
+
         # --- TOOL 1: AI QUICK ADD ---
         with col_left:
             with st.expander("✨ AI Quick Add", expanded=True):
@@ -125,7 +125,7 @@ with tab1:
                     else:
                         with st.spinner("Researching..."):
                             current_plan_str = df_plan[['Day', 'Item']].to_string() if not df_plan.empty else "Empty"
-                            
+
                             prompt = f"""
                             Task: Add "{new_item}" to this Australian trip plan.
                             Current Plan: {current_plan_str}
@@ -134,6 +134,7 @@ with tab1:
                             2. Day: Group with close items. If unsure, assign 'TBD'.
                             3. End Day: If it's a stay, infer checkout. Otherwise blank.
                             4. Time: BEST time to visit. CRITICAL: strictly use English 24-hour (e.g. 15:00) or AM/PM (e.g. 03:00 PM). NO localized text (e.g., no '下午').
+                            5. Area: General neighborhood (if applicable, else blank).
                             5. Area: General neighborhood. IF it is a flight or train, format it as "Origin ✈️ Destination" (e.g., "SYD ✈️ MEL").
                             6. Link: A highly relevant URL (Google Maps for spots, Wikipedia for landmarks, etc).
                             7. Remark: Maximum 3 words, or blank.
@@ -146,7 +147,7 @@ with tab1:
                                 response = model.generate_content(prompt)
                                 res_text = response.text.replace("```json", "").replace("```", "").strip()
                                 ai_data = json.loads(res_text)
-                                
+
                                 new_row = pd.DataFrame([{
                                     "Day": ai_data['day'], "End Day": ai_data.get('end_day', ''),
                                     "Time": ai_data.get('time', ''), "Item": new_item, "Area": ai_data.get('area', ''),
@@ -170,7 +171,7 @@ with tab1:
                     if st.button("🤖 Let AI Schedule These") and selected_tbds:
                         with st.spinner("AI is analyzing your itinerary..."):
                             scheduled_only = df_plan[df_plan['Day'] != 'TBD'][['Day', 'Time', 'Item', 'Area']].to_string()
-                            
+
                             schedule_prompt = f"""
                             I need to schedule these items: {selected_tbds}.
                             Here is my current schedule: {scheduled_only}
@@ -186,14 +187,14 @@ with tab1:
                                 response = model.generate_content(schedule_prompt)
                                 res_text = response.text.replace("```json", "").replace("```", "").strip()
                                 ai_updates = json.loads(res_text)
-                                
+
                                 # Update the dataframe
                                 for update in ai_updates:
                                     idx = df_plan.index[df_plan['Item'] == update['item']].tolist()
                                     if idx:
                                         df_plan.at[idx[0], 'Day'] = update['day']
                                         df_plan.at[idx[0], 'Time'] = update['time']
-                                
+
                                 conn.update(spreadsheet=url, data=df_plan, worksheet="Planner")
                                 st.rerun()
                             except Exception as e:
@@ -203,53 +204,6 @@ with tab1:
         st.divider()
         day_options = ["TBD", ""] + [f"Day {i}" for i in range(1, 15)]
 
-        # --- MOBILE-FRIENDLY ADD & AI POLISH ---
-col_mob, col_ai = st.columns(2)
-
-with col_mob:
-    with st.expander("📱 Mobile-Friendly Add", expanded=False):
-        with st.form("mobile_add_plan"):
-            m_item = st.text_input("Item Name (e.g., Sydney Opera House)")
-            m_day = st.selectbox("Day", ["TBD"] + [f"Day {i}" for i in range(1, 15)])
-            m_cat = st.selectbox("Category", ["✈️ Flight", "🏨 Stay", "🍴 Food", "🏖️ Nature", "🏛️ Landmark", "💡 Other"])
-            m_time = st.text_input("Time (HH:MM or blank)")
-            if st.form_submit_button("Add to Plan"):
-                new_row = pd.DataFrame([{"Day": m_day, "Time": m_time, "Item": m_item, "Category": m_cat, "Area": "", "Link": "", "Status": "Planned", "Push to Expenses": False, "Remark": ""}])
-                updated_df = pd.concat([df_plan, new_row], ignore_index=True)
-                conn.update(spreadsheet=url, data=updated_df, worksheet="Planner")
-                st.cache_data.clear()
-                st.rerun()
-
-with col_ai:
-    with st.expander("🪄 AI Magic Polish", expanded=False):
-        st.write("Fixes sloppy names and missing areas!")
-        if st.button("Polish Existing Entries"):
-            with st.spinner("AI is researching locations..."):
-                # Pass a simplified list to AI to save tokens
-                items_to_fix = df_plan[['Item', 'Area']].to_dict('records')
-                prompt = f"""
-                Task: Standardize these travel items.
-                Input: {items_to_fix}
-                1. If 'Item' is casual (e.g., 'opera house'), change to official ('Sydney Opera House').
-                2. If 'Area' is empty or wrong, provide the correct city/neighborhood. If a flight, use 'Origin ✈️ Dest'.
-                Return ONLY JSON: [ {{"old_item": "...", "new_item": "...", "new_area": "..."}} ]
-                """
-                try:
-                    import json
-                    res = model.generate_content(prompt)
-                    updates = json.loads(res.text.replace("```json", "").replace("```", "").strip())
-                    
-                    for u in updates:
-                        idx = df_plan.index[df_plan['Item'] == u['old_item']].tolist()
-                        if idx:
-                            df_plan.at[idx[0], 'Item'] = u['new_item']
-                            df_plan.at[idx[0], 'Area'] = u['new_area']
-                    conn.update(spreadsheet=url, data=df_plan, worksheet="Planner")
-                    st.cache_data.clear()
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error: {e}")
-                    
         edited_plan = st.data_editor(
             df_plan,
             num_rows="dynamic",
@@ -282,7 +236,7 @@ with col_ai:
                 st.success("Plan saved!")
                 st.cache_data.clear()
                 st.rerun()
-                
+
         with col_sync:
             if st.button("🔄 Sync 'Push 💸' to Expenses", use_container_width=True):
                 with st.spinner("Syncing..."):
@@ -292,10 +246,10 @@ with col_ai:
                     else:
                         df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=0)
                         if 'Item' not in df_exp.columns: df_exp['Item'] = ""
-                        
+
                         existing_items = df_exp['Item'].astype(str).tolist()
                         new_expenses = []
-                        
+
                         for _, row in sync_items.iterrows():
                             if str(row['Item']) not in existing_items:
                                 new_expenses.append({
@@ -305,7 +259,7 @@ with col_ai:
                                     "Amount": 0.0,  # Defaults to 0 so you can fill it in later!
                                     "Paid By": "TBD" 
                                 })
-                        
+
                         if new_expenses:
                             updated_exp = pd.concat([df_exp, pd.DataFrame(new_expenses)], ignore_index=True)
                             conn.update(spreadsheet=url, data=updated_exp, worksheet="Expenses")
@@ -339,7 +293,7 @@ with col_ai:
 
             # --- THE SCHEDULED DAYS ---
             st.write("### 📅 Your Schedule")
-            
+
             def extract_day_num(day_str):
                 try:
                     return int(str(day_str).lower().replace('day', '').strip())
@@ -351,30 +305,30 @@ with col_ai:
             scheduled_df = scheduled_df.sort_values(by=['Day_Num', 'Time'])
 
             days = scheduled_df['Day'].unique()
-            
+
             for day in days:
                 with st.expander(f"📍 {day}", expanded=True):
                     day_items = scheduled_df[scheduled_df['Day'] == day]
-                    
+
                     for _, row in day_items.iterrows():
                         time_str = f"**{row['Time']}**" if row['Time'] else "*(Anytime)*"
                         end_str = f" ➡️ *(Ends: {row['End Day']})*" if row['End Day'] else ""
                         status_emoji = "✅" if row['Status'] in ['Booked', 'Done'] else "⏳"
-                        
+
                         area_str = f" | 🏙️ *{row['Area']}*" if row['Area'] else ""
                         link_str = f" | [🔗 Link]({row['Link']})" if row['Link'] else ""
-                        
+
                         st.markdown(f"{time_str} | {row['Category']} **{row['Item']}** {end_str}{area_str}{link_str} | {status_emoji} {row['Status']}")
-                        
+
                         if row['Remark']:
                             st.caption(f"↳ {row['Remark']}")
-                            
+
 # --- TAB 2: EXPENSES & DEBTS ---
 with tab2:
     st.subheader("💸 Expense Tracker")
-    
+
     aud_to_hkd = get_aud_to_hkd_rate()
-    
+
     # --- GLOBAL VIEW SETTINGS ---
     col1, col2 = st.columns([1, 1])
     with col1:
@@ -384,12 +338,12 @@ with tab2:
 
     try:
         df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=60)
-        
+
         required_exp_cols = [
             'Date', 'Category', 'Item', 'Currency', 'Cost', 
-            'Paid By', 'Split By', 'Remark'
+            'Paid By', 'Split By', 'Settled', 'Remark'
         ]
-        
+
         for col in required_exp_cols:
             if col not in df_exp.columns:
                 if col == 'Currency': df_exp[col] = "AUD"
@@ -400,19 +354,20 @@ with tab2:
 
         df_exp = df_exp[required_exp_cols]
         df_exp = df_exp.dropna(how="all")
-        
+
         df_exp['Date'] = pd.to_datetime(df_exp['Date'], errors='coerce').dt.date
         df_exp['Settled'] = df_exp['Settled'].fillna(False).astype(bool)
         df_exp['Cost'] = pd.to_numeric(df_exp['Cost'], errors='coerce').fillna(0.0)
         df_exp['Currency'] = df_exp['Currency'].replace("", "AUD") 
         df_exp['Split By'] = df_exp['Split By'].replace("", "All")
 
+        # --- 1. BACKGROUND MATH (Always calculates everything) ---
         # --- 1. BACKGROUND MATH ---
         def get_hkd(row):
             return row['Cost'] * aud_to_hkd if row['Currency'] == 'AUD' else row['Cost']
         def get_aud(row):
             return row['Cost'] / aud_to_hkd if row['Currency'] == 'HKD' else row['Cost']
-            
+
         def get_split_count(split_str):
             s = str(split_str).strip()
             if s == 'All':
@@ -422,7 +377,7 @@ with tab2:
 
         df_exp['Cost_HKD'] = df_exp.apply(get_hkd, axis=1)
         df_exp['Cost_AUD'] = df_exp.apply(get_aud, axis=1)
-        
+
         df_exp['Split_Count'] = df_exp['Split By'].apply(get_split_count)
         df_exp['Per_Person_Cost'] = df_exp['Cost'] / df_exp['Split_Count']
         df_exp['Per_Person_HKD'] = df_exp['Cost_HKD'] / df_exp['Split_Count']
@@ -430,6 +385,7 @@ with tab2:
 
         calc_col = 'Cost_HKD' if target_currency == "HKD" else 'Cost_AUD'
 
+        # --- 2. FRONT-END DISPLAY MATH (Blanks out redundant conversions) ---
         # --- 2. FRONT-END DISPLAY MATH ---
         df_exp['Display_Total_HKD'] = df_exp.apply(lambda r: r['Cost_HKD'] if r['Currency'] == 'AUD' else None, axis=1)
         df_exp['Display_Total_AUD'] = df_exp.apply(lambda r: r['Cost_AUD'] if r['Currency'] == 'HKD' else None, axis=1)
@@ -441,23 +397,23 @@ with tab2:
         total_trip_cost = df_exp[calc_col].sum()
         total_settled = df_exp[df_exp['Settled'] == True][calc_col].sum()
         total_unsettled = total_trip_cost - total_settled
-        
+
         met1, met2, met3 = st.columns(3)
         met1.metric("Total Trip Cost", f"${total_trip_cost:,.2f} {target_currency}")
         met2.metric("Unsettled Debts", f"${total_unsettled:,.2f} {target_currency}")
         met3.metric("Already Settled", f"${total_settled:,.2f} {target_currency}")
-        
+
         st.write("##### 🧑‍🤝‍🧑 Personal Expense Breakdown")
         user_shares = {user: 0.0 for user in trip_users}
         user_cat_shares = {user: {cat: 0.0 for cat in expense_categories} for user in trip_users}
         total_cat_shares = {cat: 0.0 for cat in expense_categories}
-        
+
         for idx, row in df_exp.iterrows():
             cost = float(row[calc_col])
             cat = row['Category']
             if pd.isna(cat) or cat not in total_cat_shares:
                 cat = "💡 Other" 
-                
+
             if cost > 0:
                 total_cat_shares[cat] += cost
                 split_str = str(row['Split By']).strip()
@@ -467,27 +423,28 @@ with tab2:
                     involved = [u.strip() for u in split_str.split(',') if u.strip() in trip_users]
                     if not involved: 
                         involved = trip_users
-                        
+
                 split_amount = cost / len(involved)
                 for person in involved:
                     user_shares[person] += split_amount
                     user_cat_shares[person][cat] += split_amount
-                    
+
         share_cols = st.columns(len(trip_users))
         for i, user in enumerate(trip_users):
             with share_cols[i]:
                 st.info(f"**{user}**\n\n${user_shares[user]:,.2f} {target_currency}")
 
+        # --- THE CUTE PIE CHARTS ---
         # --- THE PIE CHARTS ---
         show_charts = st.toggle("📈 Show Category Breakdown Charts", value=False)
         if show_charts:
             chart_col1, chart_col2 = st.columns(2)
-            
+
             with chart_col1:
                 st.write("**Total Trip Breakdown**")
                 df_total_pie = pd.DataFrame(list(total_cat_shares.items()), columns=['Category', 'Amount'])
                 df_total_pie = df_total_pie[df_total_pie['Amount'] > 0] 
-                
+
                 if not df_total_pie.empty:
                     import plotly.express as px
                     fig_total = px.pie(df_total_pie, values='Amount', names='Category', hole=0.4)
@@ -496,13 +453,13 @@ with tab2:
                     st.plotly_chart(fig_total, use_container_width=True)
                 else:
                     st.caption("No expenses recorded yet!")
-                    
+
             with chart_col2:
                 st.write("**Personal Breakdown**")
                 selected_user = st.selectbox("View chart for:", trip_users, label_visibility="collapsed")
                 df_user_pie = pd.DataFrame(list(user_cat_shares[selected_user].items()), columns=['Category', 'Amount'])
                 df_user_pie = df_user_pie[df_user_pie['Amount'] > 0]
-                
+
                 if not df_user_pie.empty:
                     fig_user = px.pie(df_user_pie, values='Amount', names='Category', hole=0.4)
                     fig_user.update_traces(textposition='inside', textinfo='percent+label')
@@ -516,15 +473,15 @@ with tab2:
         # --- 2B: THE CLEAN LEDGER ---
         st.write("### 📝 Ledger")
         show_conversion = st.toggle(f"Show {target_currency} conversion in Ledger", value=False)
-        
+
         import itertools
         split_options = ["All"]
         for r in range(1, len(trip_users)):
             for combo in itertools.combinations(trip_users, r):
                 split_options.append(", ".join(combo))
-                
-        base_display_cols = ['Date', 'Category', 'Item', 'Currency', 'Cost', 'Per_Person_Cost', 'Paid By', 'Split By', 'Remark']
-        
+
+        base_display_cols = ['Date', 'Category', 'Item', 'Currency', 'Cost', 'Per_Person_Cost', 'Paid By', 'Split By', 'Settled', 'Remark']
+
         if show_conversion:
             if target_currency == "HKD":
                 display_cols = base_display_cols[:6] + ['Display_Total_HKD', 'Display_Person_HKD'] + base_display_cols[6:]
@@ -544,17 +501,21 @@ with tab2:
                 "Currency": st.column_config.SelectboxColumn("Currency", options=["AUD", "HKD"]),
                 "Cost": st.column_config.NumberColumn("Cost", format="%.2f"),
                 "Per_Person_Cost": st.column_config.NumberColumn("Per Person", format="%.2f", disabled=True),
-                
+
+                # These columns will show as blank/un-editable when the currency matches
                 "Display_Total_HKD": st.column_config.NumberColumn("Est. Total HKD", format="%.2f", disabled=True),
                 "Display_Total_AUD": st.column_config.NumberColumn("Est. Total AUD", format="%.2f", disabled=True),
                 "Display_Person_HKD": st.column_config.NumberColumn("Est. Person HKD", format="%.2f", disabled=True),
                 "Display_Person_AUD": st.column_config.NumberColumn("Est. Person AUD", format="%.2f", disabled=True),
-                
+
                 "Paid By": st.column_config.SelectboxColumn("Paid By", options=trip_users),
                 "Split By": st.column_config.SelectboxColumn("Split By", options=split_options),
+                "Settled": st.column_config.CheckboxColumn("Settled? ✅")
             }
         )
-        
+
+        if st.button("💾 Save Expenses"):
+            # Drop all math AND display columns so we don't pollute your database
         if st.button("💾 Save Expenses", use_container_width=True):
             clean_save_df = edited_exp.drop(
                 columns=['Cost_HKD', 'Cost_AUD', 'Per_Person_Cost', 'Per_Person_HKD', 'Per_Person_AUD', 'Split_Count', 
@@ -570,24 +531,24 @@ with tab2:
         st.divider()
         st.subheader("⚖️ Unified Net Balances")
         st.write("Settle up in whichever currency you prefer! (Green = You are owed money / Red = You owe money)")
-        
+
         active_debts = edited_exp[edited_exp['Settled'] == False].copy()
-        
+
         if not active_debts.empty:
             balances_aud = {user: 0.0 for user in trip_users}
-            
+
             for idx, row in active_debts.iterrows():
                 raw_cost = float(row['Cost'])
                 currency = row['Currency']
-                
+
                 if currency == 'HKD':
                     cost_in_aud = raw_cost / aud_to_hkd
                 else:
                     cost_in_aud = raw_cost
-                    
+
                 payer = str(row['Paid By']).strip()
                 split_str = str(row['Split By']).strip()
-                
+
                 if cost_in_aud > 0 and payer in balances_aud:
                     if split_str == 'All':
                         involved = trip_users
@@ -595,9 +556,9 @@ with tab2:
                         involved = [u.strip() for u in split_str.split(',') if u.strip() in trip_users]
                         if not involved: 
                             involved = trip_users
-                            
+
                     split_amount = cost_in_aud / len(involved)
-                    
+
                     balances_aud[payer] += cost_in_aud
                     for person in involved:
                         balances_aud[person] -= split_amount
@@ -608,7 +569,7 @@ with tab2:
                     st.write(f"**{user}**")
                     net_aud = balances_aud[user]
                     net_hkd = net_aud * aud_to_hkd 
-                    
+
                     if net_aud > 0.01:
                         st.success(f"+ ${net_aud:.2f} AUD\n\n(+ ${net_hkd:.2f} HKD)")
                     elif net_aud < -0.01:
@@ -658,6 +619,6 @@ with tab2:
 
         else:
             st.success("🎉 All debts are settled!")
-            
+
     except Exception as e:
          st.error(f"Robot can't read the 'Expenses' tab. Error: {e}")
