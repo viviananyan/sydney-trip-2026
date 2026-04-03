@@ -69,7 +69,13 @@ tab1, tab2 = st.tabs(["🗓️ Planner & Map", "💰 Expenses"])
 import google.generativeai as genai
 
 # Configure Gemini
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+# Check if the key exists before configuring
+if "GEMINI_API_KEY" in st.secrets:
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+    model = genai.GenerativeModel('gemini-1.5-flash')
+else:
+    st.error("🔑 AI Key missing! Please check your Streamlit Secrets.")
+    model = None # Prevents the app from crashing later
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 # --- TAB 1: PLANNER ---
