@@ -536,61 +536,36 @@ with tab2:
 
         st.divider()
 
-        # --- 2B: THE CLEAN LEDGER ---
+# --- 2B: THE CLEAN LEDGER ---
         st.write("### 📝 Ledger")
+
+        with st.expander("📱 Add Expense (Mobile Friendly)", expanded=False):
+            with st.form("mobile_add_exp"):
+                e_date = st.date_input("Date")
+                e_item = st.text_input("What did you buy?")
+                e_cost = st.number_input("Cost", min_value=0.0, format="%.2f")
+                e_curr = st.selectbox("Currency", ["AUD", "HKD"])
+                e_payer = st.selectbox("Paid By", trip_users)
+                e_split = st.selectbox("Split By", split_options)
+                e_cat = st.selectbox("Category", expense_categories)
+                
+                if st.form_submit_button("Add Expense"):
+                    new_exp = pd.DataFrame([{
+                        "Date": e_date, "Category": e_cat, "Item": e_item, 
+                        "Currency": e_curr, "Cost": e_cost, "Paid By": e_payer, 
+                        "Split By": e_split, "Remark": ""
+                    }])
+                    # Use drop to ensure we don't accidentally push math columns back to the sheet
+                    clean_save_df = edited_exp.drop(
+                        columns=['Cost_HKD', 'Cost_AUD', 'Per_Person_Cost', 'Per_Person_HKD', 'Per_Person_AUD', 'Split_Count', 'Display_Total_HKD', 'Display_Total_AUD', 'Display_Person_HKD', 'Display_Person_AUD'], 
+                        errors='ignore'
+                    )
+                    updated_exp = pd.concat([clean_save_df, new_exp], ignore_index=True)
+                    conn.update(spreadsheet=url, data=updated_exp, worksheet="Expenses")
+                    st.cache_data.clear()
+                    st.rerun()
+
         show_conversion = st.toggle(f"Show {target_currency} conversion in Ledger", value=False)
-
-        import itertools
-        split_options = ["All"]
-        for r in range(1, len(trip_users)):
-            for combo in itertools.combinations(trip_users, r):
-                split_options.append(", ".join(combo))
-
-        base_display_cols = ['Date', 'Category', 'Item', 'Currency', 'Cost', 'Per_Person_Cost', 'Paid By', 'Split By', 'Remark']
-
-        if show_conversion:
-            if target_currency == "HKD":
-                display_cols = base_display_cols[:6] + ['Display_Total_HKD', 'Display_Person_HKD'] + base_display_cols[6:]
-            else:
-                display_cols = base_display_cols[:6] + ['Display_Total_AUD', 'Display_Person_AUD'] + base_display_cols[6:]
-        else:
-            display_cols = base_display_cols
-
-        edited_exp = st.data_editor(
-            df_exp[display_cols], 
-            num_rows="dynamic", 
-            width="stretch", 
-            hide_index=True,
-            column_config={
-                "Date": st.column_config.DateColumn("Date", format="YYYY-MM-DD"),
-                "Category": st.column_config.SelectboxColumn("Category", options=expense_categories),
-                "Currency": st.column_config.SelectboxColumn("Currency", options=["AUD", "HKD"]),
-                "Cost": st.column_config.NumberColumn("Cost", format="%.2f"),
-                "Per_Person_Cost": st.column_config.NumberColumn("Per Person", format="%.2f", disabled=True),
-
-                # These columns will show as blank/un-editable when the currency matches
-                "Display_Total_HKD": st.column_config.NumberColumn("Est. Total HKD", format="%.2f", disabled=True),
-                "Display_Total_AUD": st.column_config.NumberColumn("Est. Total AUD", format="%.2f", disabled=True),
-                "Display_Person_HKD": st.column_config.NumberColumn("Est. Person HKD", format="%.2f", disabled=True),
-                "Display_Person_AUD": st.column_config.NumberColumn("Est. Person AUD", format="%.2f", disabled=True),
-
-                "Paid By": st.column_config.SelectboxColumn("Paid By", options=trip_users),
-                "Split By": st.column_config.SelectboxColumn("Split By", options=split_options)
-            }
-        )
-
-        if st.button("💾 Save Expenses"):
-            # Drop all math AND display columns so we don't pollute your database
-        if st.button("💾 Save Expenses", use_container_width=True):
-            clean_save_df = edited_exp.drop(
-                columns=['Cost_HKD', 'Cost_AUD', 'Per_Person_Cost', 'Per_Person_HKD', 'Per_Person_AUD', 'Split_Count', 
-                         'Display_Total_HKD', 'Display_Total_AUD', 'Display_Person_HKD', 'Display_Person_AUD'], 
-                errors='ignore'
-            )
-            conn.update(spreadsheet=url, data=clean_save_df, worksheet="Expenses")
-            st.success("Expenses Saved!")
-            st.cache_data.clear()
-            st.rerun()
 
         # --- 2C: SMART SETTLEMENT ENGINE ---
         st.divider()
