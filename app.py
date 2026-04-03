@@ -112,7 +112,7 @@ with tab1:
         df_plan = pd.DataFrame(columns=['Day', 'End Day', 'Time', 'Item', 'Category', 'Status', 'Cost', 'Lat', 'Lon', 'Remark'])
 
     # --- CREATE SUB-TABS ---
-    tab_edit, tab_visual = st.tabs(["📝 Edit Itinerary", "📅 Visual Timeline"])
+    tab_edit, tab_visual, tab_map = st.tabs(["📝 Edit Itinerary", "📅 Visual Timeline", "🗺️ Map View"])
 
     # ==========================================
     # SUB-TAB 1: THE DATA EDITOR & AI TOOL
@@ -315,6 +315,53 @@ with tab1:
                         
                         if row['Remark']:
                             st.caption(f"↳ {row['Remark']}")
+
+# ==========================================
+    # SUB-TAB 3: THE MAP VIEW
+    # ==========================================
+    with tab_map:
+        st.write("### 🗺️ Interactive Trip Map")
+        st.caption("Dots are color-coded by Day. Hover over a dot to see the details!")
+        
+        # 1. Clean the data for mapping
+        map_df = df_plan.copy()
+        
+        # Ensure coordinates are numbers and drop empty ones
+        map_df['Lat'] = pd.to_numeric(map_df['Lat'], errors='coerce')
+        map_df['Lon'] = pd.to_numeric(map_df['Lon'], errors='coerce')
+        map_df = map_df.dropna(subset=['Lat', 'Lon'])
+        
+        # Remove any default 0.0 coordinates so we don't end up in the ocean off Africa
+        map_df = map_df[(map_df['Lat'] != 0) & (map_df['Lon'] != 0)]
+        
+        if map_df.empty:
+            st.info("No valid GPS locations found yet! Add a spot like 'Sydney Opera House' via AI to see it here.")
+        else:
+            import plotly.express as px
+            
+            # 2. Build the interactive Plotly map
+            fig = px.scatter_mapbox(
+                map_df,
+                lat="Lat",
+                lon="Lon",
+                hover_name="Item",
+                hover_data={
+                    "Day": True, 
+                    "Category": True, 
+                    "Time": True, 
+                    "Lat": False, # Hide GPS numbers in the tooltip
+                    "Lon": False
+                },
+                color="Day",  # Automatically color-codes by day!
+                zoom=10,
+                height=600
+            )
+            
+            # 3. Use an open-source map style that doesn't require extra API keys
+            fig.update_layout(mapbox_style="open-street-map")
+            fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0}) # Removes ugly white borders
+            
+            st.plotly_chart(fig, use_container_width=True)
                             
 # --- TAB 2: EXPENSES & DEBTS ---
 with tab2:
