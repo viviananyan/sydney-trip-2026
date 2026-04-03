@@ -86,10 +86,12 @@ with tab1:
     try:
         df_plan = conn.read(spreadsheet=url, worksheet="Planner", ttl=60)
         
-        required_cols = ['Day', 'End Day', 'Time', 'Item', 'Category', 'Status', 'Cost', 'Lat', 'Lon', 'Remark']
+# The new super-columns including the checkbox
+        required_cols = ['Day', 'End Day', 'Time', 'Item', 'Category', 'Status', 'Cost', 'Push to Expenses', 'Lat', 'Lon', 'Remark']
         for col in required_cols:
             if col not in df_plan.columns:
                 if col == 'Cost': df_plan[col] = 0.0
+                elif col == 'Push to Expenses': df_plan[col] = False
                 else: df_plan[col] = None
                 
         df_plan = df_plan[required_cols] 
@@ -98,6 +100,9 @@ with tab1:
         df_plan['Cost'] = pd.to_numeric(df_plan['Cost'], errors='coerce').fillna(0.0)
         df_plan['Lat'] = pd.to_numeric(df_plan['Lat'], errors='coerce')
         df_plan['Lon'] = pd.to_numeric(df_plan['Lon'], errors='coerce')
+        
+        # Force the checkbox column to be boolean (True/False)
+        df_plan['Push to Expenses'] = df_plan['Push to Expenses'].astype(str).str.upper().map({'TRUE': True}).fillna(False)
         
         for col in ['Day', 'End Day', 'Time', 'Item', 'Category', 'Status', 'Remark']:
             df_plan[col] = df_plan[col].fillna("").astype(str)
