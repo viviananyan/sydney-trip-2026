@@ -93,11 +93,17 @@ with tab1:
                 if col == 'Cost': df_plan[col] = 0.0
                 else: df_plan[col] = None
                 
-        df_plan = df_plan[required_cols] 
+       df_plan = df_plan[required_cols] 
         df_plan = df_plan.dropna(how="all")
         
-        # Ensure Cost is numeric
+        # Force numeric columns to ACTUALLY be numbers so Streamlit doesn't panic
         df_plan['Cost'] = pd.to_numeric(df_plan['Cost'], errors='coerce').fillna(0.0)
+        df_plan['Lat'] = pd.to_numeric(df_plan['Lat'], errors='coerce')
+        df_plan['Lon'] = pd.to_numeric(df_plan['Lon'], errors='coerce')
+        
+        # Force text columns to be strings to handle empty cells gracefully
+        for col in ['Day', 'Time', 'Item', 'Category', 'Status', 'Remark']:
+            df_plan[col] = df_plan[col].fillna("").astype(str)
         
     except Exception as e:
         st.error(f"Robot can't read the 'Planner' tab. Error: {e}")
