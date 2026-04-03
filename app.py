@@ -427,7 +427,6 @@ with tab2:
         df_exp['Split By'] = df_exp['Split By'].replace("", "All")
 
         # --- 1. BACKGROUND MATH (Always calculates everything) ---
-        # --- 1. BACKGROUND MATH ---
         def get_hkd(row):
             return row['Cost'] * aud_to_hkd if row['Currency'] == 'AUD' else row['Cost']
         def get_aud(row):
@@ -538,7 +537,7 @@ with tab2:
         # --- 2B: THE CLEAN LEDGER ---
         st.write("### 📝 Ledger")
 
-        with st.expander("📱 Add Expense (Mobile Friendly)", expanded=False):
+       with st.expander("📱 Add Expense (Mobile Friendly)", expanded=False):
             with st.form("mobile_add_exp"):
                 e_date = st.date_input("Date")
                 e_item = st.text_input("What did you buy?")
@@ -554,7 +553,6 @@ with tab2:
                         "Currency": e_curr, "Cost": e_cost, "Paid By": e_payer, 
                         "Split By": e_split, "Remark": ""
                     }])
-                    # Use drop to ensure we don't accidentally push math columns back to the sheet
                     clean_save_df = edited_exp.drop(
                         columns=['Cost_HKD', 'Cost_AUD', 'Per_Person_Cost', 'Per_Person_HKD', 'Per_Person_AUD', 'Split_Count', 'Display_Total_HKD', 'Display_Total_AUD', 'Display_Person_HKD', 'Display_Person_AUD'], 
                         errors='ignore'
@@ -563,7 +561,7 @@ with tab2:
                     conn.update(spreadsheet=url, data=updated_exp, worksheet="Expenses")
                     st.cache_data.clear()
                     st.rerun()
-
+                    
         show_conversion = st.toggle(f"Show {target_currency} conversion in Ledger", value=False)
         
         # --- 2C: SMART SETTLEMENT ENGINE ---
