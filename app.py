@@ -536,33 +536,30 @@ with tab2:
 
         # --- 2B: THE CLEAN LEDGER ---
         st.write("### 📝 Ledger")
-
-       with st.expander("📱 Add Expense (Mobile Friendly)", expanded=False):
-            with st.form("mobile_add_exp"):
-                e_date = st.date_input("Date")
-                e_item = st.text_input("What did you buy?")
-                e_cost = st.number_input("Cost", min_value=0.0, format="%.2f")
-                e_curr = st.selectbox("Currency", ["AUD", "HKD"])
-                e_payer = st.selectbox("Paid By", trip_users)
-                e_split = st.selectbox("Split By", split_options)
-                e_cat = st.selectbox("Category", expense_categories)
-                
-                if st.form_submit_button("Add Expense"):
-                    new_exp = pd.DataFrame([{
-                        "Date": e_date, "Category": e_cat, "Item": e_item, 
-                        "Currency": e_curr, "Cost": e_cost, "Paid By": e_payer, 
-                        "Split By": e_split, "Remark": ""
-                    }])
-                    clean_save_df = edited_exp.drop(
-                        columns=['Cost_HKD', 'Cost_AUD', 'Per_Person_Cost', 'Per_Person_HKD', 'Per_Person_AUD', 'Split_Count', 'Display_Total_HKD', 'Display_Total_AUD', 'Display_Person_HKD', 'Display_Person_AUD'], 
-                        errors='ignore'
-                    )
-                    updated_exp = pd.concat([clean_save_df, new_exp], ignore_index=True)
-                    conn.update(spreadsheet=url, data=updated_exp, worksheet="Expenses")
-                    st.cache_data.clear()
-                    st.rerun()
-                    
-        show_conversion = st.toggle(f"Show {target_currency} conversion in Ledger", value=False)
+        with st.expander("📱 Add Expense (Mobile Friendly)", expanded=False):
+        with st.form("mobile_add_exp"):
+        e_date = st.date_input("Date")
+        e_item = st.text_input("What did you buy?")
+        e_cost = st.number_input("Cost", min_value=0.0, format="%.2f")
+        e_curr = st.selectbox("Currency", ["AUD", "HKD"])
+        e_payer = st.selectbox("Paid By", trip_users)
+        e_split = st.selectbox("Split By", split_options)
+        e_cat = st.selectbox("Category", expense_categories)
+        
+        if st.form_submit_button("Add Expense"):
+        new_exp = pd.DataFrame([{
+        "Date": e_date, "Category": e_cat, "Item": e_item, 
+        "Currency": e_curr, "Cost": e_cost, "Paid By": e_payer, 
+        "Split By": e_split, "Remark": ""
+        }])
+        clean_save_df = edited_exp.drop(
+        columns=['Cost_HKD', 'Cost_AUD', 'Per_Person_Cost', 'Per_Person_HKD', 'Per_Person_AUD', 'Split_Count', 'Display_Total_HKD', 'Display_Total_AUD', 'Display_Person_HKD', 'Display_Person_AUD'], 
+        errors='ignore'
+        )
+        updated_exp = pd.concat([clean_save_df, new_exp], ignore_index=True)
+        conn.update(spreadsheet=url, data=updated_exp, worksheet="Expenses")
+        st.cache_data.clear()
+        st.rerun()
         
         # --- 2C: SMART SETTLEMENT ENGINE ---
         st.divider()
