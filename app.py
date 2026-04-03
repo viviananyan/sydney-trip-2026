@@ -82,50 +82,53 @@ model = genai.GenerativeModel('gemini-2.5-flash')
 with tab1:
     st.subheader("📍 Smart Itinerary")
     
-    # 1. READ THE GOOGLE SHEET FIRST (This fixes the NameError!)
+    # 1. READ THE NEW GOOGLE SHEET SCHEMA
     try:
         df_plan = conn.read(spreadsheet=url, worksheet="Planner", ttl=60)
         
-        # Ensure all necessary columns exist so the AI doesn't break
-        required_cols = ['Day', 'Spot', 'Category', 'Status', 'Remark']
+        # The new super-columns
+        required_cols = ['Day', 'Time', 'Item', 'Category', 'Status', 'Cost', 'Lat', 'Lon', 'Remark']
         for col in required_cols:
             if col not in df_plan.columns:
-                df_plan[col] = None
-        df_plan = df_plan[required_cols] # Keep it clean
+                if col == 'Cost': df_plan[col] = 0.0
+                else: df_plan[col] = None
+                
+        df_plan = df_plan[required_cols] 
         df_plan = df_plan.dropna(how="all")
+        
+        # Ensure Cost is numeric
+        df_plan['Cost'] = pd.to_numeric(df_plan['Cost'], errors='coerce').fillna(0.0)
         
     except Exception as e:
         st.error(f"Robot can't read the 'Planner' tab. Error: {e}")
-        # Create an empty dummy dataframe so the app doesn't crash
-        df_plan = pd.DataFrame(columns=['Day', 'Spot', 'Category', 'Status', 'Remark'])
+        df_plan = pd.DataFrame(columns=['Day', 'Time', 'Item', 'Category', 'Status', 'Cost', 'Lat', 'Lon', 'Remark'])
 
-    # --- AI ASSISTANT SECTION ---
-    with st.expander("✨ AI Quick Add", expanded=True):
+    # --- AI ASSISTANT SECTION (Now with GPS!) ---
+    with st.expander("✨ AI Quick Add (Spots, Flights, Stays)", expanded=True):
         col_input, col_btn = st.columns([4, 1])
-        new_spot = col_input.text_input("Where do you want to go?", placeholder="e.g. Bondi Icebergs")
+        new_item = col_input.text_input("What are we doing or booking?", placeholder="e.g. Qantas Flight to SYD, Bondi Beach, Hilton Hotel")
         
-        if col_btn.button("Magic Add") and new_spot:
-            # Check if Gemini is connected properly
+        if col_btn.button("Magic Add") and new_item:
             if "GEMINI_API_KEY" not in st.secrets:
-                st.error("🔑 AI Key missing! Put it at the VERY TOP of your Streamlit Secrets.")
+                st.error("🔑 AI Key missing! Check your Streamlit Secrets.")
             else:
-                with st.spinner(f"Gemini is researching {new_spot}..."):
-                    current_plan_str = df_plan[['Day', 'Spot']].to_string() if not df_plan.empty else "Empty"
+                with st.spinner(f"Gemini is researching {new_item}..."):
+                    current_plan_str = df_plan[['Day', 'Item']].to_string() if not df_plan.empty else "Empty"
                     
                     prompt = f"""
                     I am planning a trip to Australia. 
-                    New Spot: {new_spot}
-                    Current Plan:
-                    {current_plan_str}
+                    New Item: {new_item}
+                    Current Plan: {current_plan_str}
 
                     Task:
-                    1. Determine the category (e.g., 🍴 Food, 🏖️ Nature, 🏛️ Landmark, 🛍️ Shopping).
-                    2. Look at the Current Plan. Group this new spot with existing spots that are geographically close. 
-                    3. If it's near spots on 'Day 1', assign it to 'Day 1'. If it's far from everything, give it a new Day.
-                    4. Suggest the best time to visit.
+                    1. Determine the category (e.g., ✈️ Flight, 🏨 Stay, 🍴 Food, 🏖️ Nature, 🏛️ Landmark).
+                    2. Look at the Current Plan. If this is a location, group it with close items. 
+                    3. If you aren't sure which day, or if it's just a general idea, assign it to 'TBD'. Otherwise assign 'Day X'.
+                    4. Suggest a logical Time (e.g., 10:00 AM) or leave blank if unknown.
+                    5. Find the exact GPS Latitude and Longitude for this place. If it's a flight, use the destination airport GPS.
 
-                    Return ONLY a JSON object like this:
-                    {{"category": "emoji + category", "day": "Day X", "suggested_time": "HH:MM AM/PM", "reason": "why this group?"}}
+                    Return ONLY a JSON object exactly like this:
+                    {{"category": "emoji + category", "day": "Day X or TBD", "time": "HH:MM AM", "lat": float, "lon": float, "reason": "why this group?"}}
                     """
                     
                     try:
@@ -134,55 +137,47 @@ with tab1:
                         res_text = response.text.replace("```json", "").replace("```", "").strip()
                         ai_data = json.loads(res_text)
                         
-                        # Create new row
                         new_row = pd.DataFrame([{
                             "Day": ai_data['day'],
-                            "Spot": new_spot,
+                            "Time": ai_data.get('time', ''),
+                            "Item": new_item,
                             "Category": ai_data['category'],
                             "Status": "Planned",
-                            "Remark": f"AI Suggestion: {ai_data['suggested_time']} - {ai_data['reason']}"
+                            "Cost": 0.0,
+                            "Lat": ai_data.get('lat', None),
+                            "Lon": ai_data.get('lon', None),
+                            "Remark": f"AI: {ai_data.get('reason', '')}"
                         }])
                         
-                        # Update Google Sheets
                         updated_df = pd.concat([df_plan, new_row], ignore_index=True)
                         conn.update(spreadsheet=url, data=updated_df, worksheet="Planner")
-                        st.success(f"Added {new_spot} to {ai_data['day']}!")
+                        st.success(f"Added {new_item} to {ai_data['day']}!")
                         st.cache_data.clear()
                         st.rerun()
                     except Exception as e:
                         st.error(f"AI was a bit confused: {e}")
 
-    # --- THE OPTIMIZER MAGIC WAND ---
-    if not df_plan.empty:
-        if st.button("🪄 Optimize Entire Schedule"):
-            if "GEMINI_API_KEY" not in st.secrets:
-                st.error("🔑 AI Key missing in Secrets!")
-            else:
-                with st.spinner("Rearranging your trip for maximum efficiency..."):
-                    full_plan = df_plan[['Spot', 'Remark']].to_string()
-                    optimize_prompt = f"""
-                    Rearrange this travel list into a logical daily itinerary based on geography (group close items) and best visit times.
-                    Current List:
-                    {full_plan}
-
-                    Return a clear, readable text format explaining how I should move things around to minimize travel distance.
-                    Format: Spot | New Day | Reasoning
-                    """
-                    advice = model.generate_content(optimize_prompt)
-                    st.info("### AI Optimization Advice")
-                    st.markdown(advice.text)
-
-    # --- DISPLAY THE PLAN ---
+    # --- SPLIT VIEW: TBD vs SCHEDULED ---
     st.divider()
+    st.write("### 📝 Master Itinerary")
+    
+    # We create dropdown options that include TBD and Day 1-14
+    day_options = ["TBD"] + [f"Day {i}" for i in range(1, 15)]
+    
     edited_plan = st.data_editor(
         df_plan,
         num_rows="dynamic",
         use_container_width=True,
         hide_index=True,
         column_config={
-            "Day": st.column_config.SelectboxColumn("Day", options=[f"Day {i}" for i in range(1, 15)]),
-            "Category": st.column_config.TextColumn("Category", disabled=True),
-            "Status": st.column_config.SelectboxColumn("Status", options=["Planned", "Confirmed", "Done"])
+            "Day": st.column_config.SelectboxColumn("Day", options=day_options),
+            "Time": st.column_config.TextColumn("Time (e.g. 10:00 AM)"),
+            "Item": st.column_config.TextColumn("Item / Spot", required=True),
+            "Category": st.column_config.TextColumn("Category"),
+            "Status": st.column_config.SelectboxColumn("Status", options=["Planned", "Booked", "Done"]),
+            "Cost": st.column_config.NumberColumn("Est. Cost", format="$%.2f"),
+            "Lat": st.column_config.NumberColumn("Latitude", disabled=True),
+            "Lon": st.column_config.NumberColumn("Longitude", disabled=True)
         }
     )
 
@@ -191,7 +186,7 @@ with tab1:
         st.success("Plan saved!")
         st.cache_data.clear()
         st.rerun()
-
+        
 # --- TAB 2: EXPENSES & DEBTS ---
 with tab2:
     st.subheader("💸 Expense Tracker")
