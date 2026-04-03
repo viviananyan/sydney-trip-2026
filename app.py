@@ -82,7 +82,7 @@ model = genai.GenerativeModel('gemini-2.5-flash')
 with tab1:
     st.subheader("📍 Smart Itinerary")
     
-    # 1. READ THE NEW GOOGLE SHEET SCHEMA
+# 1. READ THE NEW GOOGLE SHEET SCHEMA
     try:
         df_plan = conn.read(spreadsheet=url, worksheet="Planner", ttl=60)
         
@@ -93,7 +93,7 @@ with tab1:
                 if col == 'Cost': df_plan[col] = 0.0
                 else: df_plan[col] = None
                 
-       df_plan = df_plan[required_cols] 
+        df_plan = df_plan[required_cols] 
         df_plan = df_plan.dropna(how="all")
         
         # Force numeric columns to ACTUALLY be numbers so Streamlit doesn't panic
@@ -104,11 +104,10 @@ with tab1:
         # Force text columns to be strings to handle empty cells gracefully
         for col in ['Day', 'Time', 'Item', 'Category', 'Status', 'Remark']:
             df_plan[col] = df_plan[col].fillna("").astype(str)
-        
+            
     except Exception as e:
         st.error(f"Robot can't read the 'Planner' tab. Error: {e}")
         df_plan = pd.DataFrame(columns=['Day', 'Time', 'Item', 'Category', 'Status', 'Cost', 'Lat', 'Lon', 'Remark'])
-
     # --- AI ASSISTANT SECTION (Now with GPS!) ---
     with st.expander("✨ AI Quick Add (Spots, Flights, Stays)", expanded=True):
         col_input, col_btn = st.columns([4, 1])
