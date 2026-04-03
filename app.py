@@ -86,8 +86,8 @@ with tab1:
     try:
         df_plan = conn.read(spreadsheet=url, worksheet="Planner", ttl=60)
         
-# The new super-columns including the checkbox
-        required_cols = ['Day', 'End Day', 'Time', 'Item', 'Category', 'Status', 'Cost', 'Push to Expenses', 'Lat', 'Lon', 'Remark']
+        # Swapped Lat/Lon for Area and Map Link
+        required_cols = ['Day', 'End Day', 'Time', 'Item', 'Area', 'Category', 'Status', 'Cost', 'Push to Expenses', 'Map Link', 'Remark']
         for col in required_cols:
             if col not in df_plan.columns:
                 if col == 'Cost': df_plan[col] = 0.0
@@ -98,21 +98,17 @@ with tab1:
         df_plan = df_plan.dropna(how="all")
         
         df_plan['Cost'] = pd.to_numeric(df_plan['Cost'], errors='coerce').fillna(0.0)
-        df_plan['Lat'] = pd.to_numeric(df_plan['Lat'], errors='coerce')
-        df_plan['Lon'] = pd.to_numeric(df_plan['Lon'], errors='coerce')
-        
-        # Force the checkbox column to be boolean (True/False)
         df_plan['Push to Expenses'] = df_plan['Push to Expenses'].astype(str).str.upper().map({'TRUE': True}).fillna(False)
         
-        for col in ['Day', 'End Day', 'Time', 'Item', 'Category', 'Status', 'Remark']:
+        for col in ['Day', 'End Day', 'Time', 'Item', 'Area', 'Category', 'Status', 'Map Link', 'Remark']:
             df_plan[col] = df_plan[col].fillna("").astype(str)
             
     except Exception as e:
         st.error(f"Robot can't read the 'Planner' tab. Error: {e}")
-        df_plan = pd.DataFrame(columns=['Day', 'End Day', 'Time', 'Item', 'Category', 'Status', 'Cost', 'Lat', 'Lon', 'Remark'])
+        df_plan = pd.DataFrame(columns=['Day', 'End Day', 'Time', 'Item', 'Area', 'Category', 'Status', 'Cost', 'Push to Expenses', 'Map Link', 'Remark'])
 
-    # --- CREATE SUB-TABS ---
-    tab_edit, tab_visual, tab_map = st.tabs(["📝 Edit Itinerary", "📅 Visual Timeline", "🗺️ Map View"])
+    # --- CREATE SUB-TABS (Map View Removed) ---
+    tab_edit, tab_visual = st.tabs(["📝 Edit Itinerary", "📅 Visual Timeline"])
 
     # ==========================================
     # SUB-TAB 1: THE DATA EDITOR & AI TOOL
@@ -121,7 +117,7 @@ with tab1:
         # --- AI ASSISTANT SECTION ---
         with st.expander("✨ AI Quick Add (Spots, Flights, Stays)", expanded=True):
             col_input, col_btn = st.columns([4, 1])
-            new_item = col_input.text_input("What are we doing or booking?", placeholder="e.g. Qantas Flight to SYD, Bondi Beach, QT Bondi 3 nights")
+            new_item = col_input.text_input("What are we doing or booking?", placeholder="e.g. Qantas Flight to SYD, Bondi Icebergs")
             
             if col_btn.button("Magic Add") and new_item:
                 if "GEMINI_API_KEY" not in st.secrets:
@@ -136,15 +132,16 @@ with tab1:
                         Current Plan: {current_plan_str}
 
                         Task:
-                        1. Determine the category (e.g., ✈️ Flight, 🏨 Stay, 🍴 Food, 🏖️ Nature, 🏛️ Landmark).
-                        2. Look at the Current Plan. If this is a location, group it with close items. 
-                        3. If you aren't sure which day, assign 'TBD'. Otherwise assign 'Day X'.
-                        4. If this is a hotel/stay, try to infer the checkout day based on the text (e.g., "3 nights"). If you don't know, leave end_day blank. For normal spots, leave end_day blank.
-                        5. Suggest a logical Time (e.g., 10:00 AM) or leave blank.
-                        6. Find the exact GPS Latitude and Longitude for this place.
+                        1. Determine the category using EXACTLY one of these options: ✈️ Flight, 🏨 Stay, 🍴 Food, 🏖️ Nature, 🏛️ Landmark, 🛍️ Shopping, 🚗 Transport, 🎭 Entertainment, 💡 Other.
+                        2. Look at the Current Plan. Group close items. If unsure, assign 'TBD'. Otherwise assign 'Day X'.
+                        3. If it's a stay, infer checkout 'end_day' (e.g. "3 nights"). Otherwise leave blank.
+                        4. Suggest the BEST time to visit in the 'time' field (e.g., "10:00 AM (Best)").
+                        5. Determine the general 'area' or neighborhood (e.g., "Sydney CBD", "Bondi").
+                        6. Create a Google Maps search URL for this spot formatted exactly like this: "https://www.google.com/maps/search/?api=1&query=Spot+Name+Australia"
+                        7. Keep 'remark' completely empty or maximum 3 words (DO NOT write a long explanation).
 
                         Return ONLY a JSON object exactly like this:
-                        {{"category": "emoji + category", "day": "Day X or TBD", "end_day": "Day Y or blank", "time": "HH:MM AM", "lat": float, "lon": float, "reason": "why this group?"}}
+                        {{"category": "...", "day": "Day X or TBD", "end_day": "...", "time": "...", "area": "...", "map_link": "...", "remark": "..."}}
                         """
                         
                         try:
@@ -158,12 +155,13 @@ with tab1:
                                 "End Day": ai_data.get('end_day', ''),
                                 "Time": ai_data.get('time', ''),
                                 "Item": new_item,
+                                "Area": ai_data.get('area', ''),
                                 "Category": ai_data['category'],
                                 "Status": "Planned",
                                 "Cost": 0.0,
-                                "Lat": ai_data.get('lat', None),
-                                "Lon": ai_data.get('lon', None),
-                                "Remark": f"AI: {ai_data.get('reason', '')}"
+                                "Push to Expenses": False,
+                                "Map Link": ai_data.get('map_link', ''),
+                                "Remark": ai_data.get('remark', '')
                             }])
                             
                             updated_df = pd.concat([df_plan, new_row], ignore_index=True)
@@ -184,25 +182,23 @@ with tab1:
             use_container_width=True,
             hide_index=True,
             column_config={
-                "Day": st.column_config.SelectboxColumn("Start Day", options=day_options, width="small"),
-                "End Day": st.column_config.SelectboxColumn("End Day (Stays)", options=day_options, width="small"),
-                "Time": st.column_config.TextColumn("Time", width="small"),
+                "Day": st.column_config.SelectboxColumn("Start", options=day_options, width="small"),
+                "End Day": st.column_config.SelectboxColumn("End", options=day_options, width="small"),
+                "Time": st.column_config.TextColumn("Best Time", width="small"),
                 "Item": st.column_config.TextColumn("Item / Spot", required=True),
-             "Category": st.column_config.SelectboxColumn(
-    "Category", 
-    options=[
-        "✈️ Flight", "🏨 Stay", "🍴 Food", "🏖️ Nature", 
-        "🏛️ Landmark", "🛍️ Shopping", "🚗 Transport", 
-        "🎭 Entertainment", "💡 Other"
-    ]
-),
+                "Area": st.column_config.TextColumn("Area", width="small"),
+                "Category": st.column_config.SelectboxColumn(
+                    "Category", 
+                    options=[
+                        "✈️ Flight", "🏨 Stay", "🍴 Food", "🏖️ Nature", 
+                        "🏛️ Landmark", "🛍️ Shopping", "🚗 Transport", 
+                        "🎭 Entertainment", "💡 Other"
+                    ]
+                ),
                 "Status": st.column_config.SelectboxColumn("Status", options=["Planned", "Booked", "Done"]),
-               # ... existing configs ...
-            "Cost": st.column_config.NumberColumn("Est. Cost", format="$%.2f"),
-            "Push to Expenses": st.column_config.CheckboxColumn("Push 💸", default=False), # NEW CHECKBOX
-            "Lat": st.column_config.NumberColumn("Latitude", disabled=True),
-            # ... existing configs ...
-                "Lon": st.column_config.NumberColumn("Longitude", disabled=True)
+                "Cost": st.column_config.NumberColumn("Est. Cost", format="$%.2f"),
+                "Push to Expenses": st.column_config.CheckboxColumn("Push 💸", default=False),
+                "Map Link": st.column_config.LinkColumn("Google Maps", display_text="📍 Open Map")
             }
         )
 
@@ -212,7 +208,7 @@ with tab1:
             st.cache_data.clear()
             st.rerun()
 
-    # --- FINANCIAL SYNC (SELECTIVE) ---
+        # --- FINANCIAL SYNC (SELECTIVE) ---
         st.divider()
         st.write("### 💸 Financial Sync")
         st.caption("Check the 'Push 💸' box on any items you want to send to your Expenses sheet.")
@@ -220,13 +216,10 @@ with tab1:
         if st.button("🔄 Sync Selected to Expenses"):
             with st.spinner("Syncing selected items..."):
                 try:
-                    # 1. Filter ONLY for items where the checkbox is ticked
                     sync_items = edited_plan[edited_plan['Push to Expenses'] == True]
-                    
                     if sync_items.empty:
                         st.warning("Please check the 'Push 💸' box next to the items you want to sync!")
                     else:
-                        # 2. Read the Expenses sheet
                         df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=0)
                         if 'Item' not in df_exp.columns: df_exp['Item'] = ""
                         
@@ -243,26 +236,20 @@ with tab1:
                                     "Paid By": "TBD" 
                                 })
                         
-                        # 3. Push to Expenses tab
                         if new_expenses:
                             updated_exp = pd.concat([df_exp, pd.DataFrame(new_expenses)], ignore_index=True)
                             conn.update(spreadsheet=url, data=updated_exp, worksheet="Expenses")
-                            
-                            # 4. RESET PLANNER CHECKBOXES: Uncheck them so they don't sync again!
                             edited_plan['Push to Expenses'] = False
                             conn.update(spreadsheet=url, data=edited_plan, worksheet="Planner")
-                            
                             st.success(f"Successfully synced {len(new_expenses)} items! Checkboxes have been reset.")
                             st.cache_data.clear()
                             st.rerun()
                         else:
                             st.info("These items are already in your Expenses sheet. No duplicates added!")
-                            # Reset checkboxes anyway
                             edited_plan['Push to Expenses'] = False
                             conn.update(spreadsheet=url, data=edited_plan, worksheet="Planner")
                             st.cache_data.clear()
                             st.rerun()
-                            
                 except Exception as e:
                     st.error(f"Failed to sync. Error: {e}")
 
@@ -277,29 +264,27 @@ with tab1:
             tbd_items = df_plan[df_plan['Day'] == 'TBD']
             if not tbd_items.empty:
                 st.write("### 📌 Bucket List (Unscheduled)")
-                # Show TBD items as cool little cards
                 cols = st.columns(3)
                 for i, row in tbd_items.iterrows():
                     with cols[i % 3]:
-                        st.info(f"**{row['Category']} {row['Item']}**\n\n*Cost: ${row['Cost']}*")
+                        area_str = f"\n*🏙️ {row['Area']}*" if row['Area'] else ""
+                        map_str = f"\n[📍 Google Maps]({row['Map Link']})" if row['Map Link'] else ""
+                        st.info(f"**{row['Category']} {row['Item']}**{area_str}{map_str}")
                 st.divider()
 
             # --- 2. THE SCHEDULED DAYS ---
             st.write("### 📅 Your Schedule")
             
-            # Helper function to sort 'Day 1', 'Day 2', 'Day 10' properly
             def extract_day_num(day_str):
                 try:
                     return int(str(day_str).lower().replace('day', '').strip())
                 except:
                     return 999
 
-            # Filter out TBD and blanks, then sort
             scheduled_df = df_plan[(df_plan['Day'] != 'TBD') & (df_plan['Day'] != '')].copy()
             scheduled_df['Day_Num'] = scheduled_df['Day'].apply(extract_day_num)
             scheduled_df = scheduled_df.sort_values(by=['Day_Num', 'Time'])
 
-            # Group by Day and display
             days = scheduled_df['Day'].unique()
             
             for day in days:
@@ -311,57 +296,13 @@ with tab1:
                         end_str = f" ➡️ *(Ends: {row['End Day']})*" if row['End Day'] else ""
                         status_emoji = "✅" if row['Status'] in ['Booked', 'Done'] else "⏳"
                         
-                        st.markdown(f"{time_str} | {row['Category']} **{row['Item']}** {end_str} | {status_emoji} {row['Status']}")
+                        area_str = f" | 🏙️ *{row['Area']}*" if row['Area'] else ""
+                        map_str = f" | [📍 Map]({row['Map Link']})" if row['Map Link'] else ""
                         
-                        if row['Remark']:
+                        st.markdown(f"{time_str} | {row['Category']} **{row['Item']}** {end_str}{area_str}{map_str} | {status_emoji} {row['Status']}")
+                        
+                        if row['Remark'] and row['Remark'].strip() != "AI:":
                             st.caption(f"↳ {row['Remark']}")
-
-# ==========================================
-    # SUB-TAB 3: THE MAP VIEW
-    # ==========================================
-    with tab_map:
-        st.write("### 🗺️ Interactive Trip Map")
-        st.caption("Dots are color-coded by Day. Hover over a dot to see the details!")
-        
-        # 1. Clean the data for mapping
-        map_df = df_plan.copy()
-        
-        # Ensure coordinates are numbers and drop empty ones
-        map_df['Lat'] = pd.to_numeric(map_df['Lat'], errors='coerce')
-        map_df['Lon'] = pd.to_numeric(map_df['Lon'], errors='coerce')
-        map_df = map_df.dropna(subset=['Lat', 'Lon'])
-        
-        # Remove any default 0.0 coordinates so we don't end up in the ocean off Africa
-        map_df = map_df[(map_df['Lat'] != 0) & (map_df['Lon'] != 0)]
-        
-        if map_df.empty:
-            st.info("No valid GPS locations found yet! Add a spot like 'Sydney Opera House' via AI to see it here.")
-        else:
-            import plotly.express as px
-            
-            # 2. Build the interactive Plotly map
-            fig = px.scatter_mapbox(
-                map_df,
-                lat="Lat",
-                lon="Lon",
-                hover_name="Item",
-                hover_data={
-                    "Day": True, 
-                    "Category": True, 
-                    "Time": True, 
-                    "Lat": False, # Hide GPS numbers in the tooltip
-                    "Lon": False
-                },
-                color="Day",  # Automatically color-codes by day!
-                zoom=10,
-                height=600
-            )
-            
-            # 3. Use an open-source map style that doesn't require extra API keys
-            fig.update_layout(mapbox_style="open-street-map")
-            fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0}) # Removes ugly white borders
-            
-            st.plotly_chart(fig, use_container_width=True)
                             
 # --- TAB 2: EXPENSES & DEBTS ---
 with tab2:
