@@ -376,7 +376,7 @@ with tab2:
 
     aud_to_hkd = get_aud_to_hkd_rate()
     with st.expander("📱 Add Expense (Mobile Friendly)", expanded=False):
-    with st.form("mobile_add_exp"):
+                    with st.form("mobile_add_exp"):
         e_date = st.date_input("Date")
         e_item = st.text_input("What did you buy?")
         e_cost = st.number_input("Cost", min_value=0.0, format="%.2f")
