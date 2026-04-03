@@ -204,6 +204,53 @@ with tab1:
         st.divider()
         day_options = ["TBD", ""] + [f"Day {i}" for i in range(1, 15)]
 
+        # --- MOBILE-FRIENDLY ADD & AI POLISH ---
+col_mob, col_ai = st.columns(2)
+
+with col_mob:
+    with st.expander("📱 Mobile-Friendly Add", expanded=False):
+        with st.form("mobile_add_plan"):
+            m_item = st.text_input("Item Name (e.g., Sydney Opera House)")
+            m_day = st.selectbox("Day", ["TBD"] + [f"Day {i}" for i in range(1, 15)])
+            m_cat = st.selectbox("Category", ["✈️ Flight", "🏨 Stay", "🍴 Food", "🏖️ Nature", "🏛️ Landmark", "💡 Other"])
+            m_time = st.text_input("Time (HH:MM or blank)")
+            if st.form_submit_button("Add to Plan"):
+                new_row = pd.DataFrame([{"Day": m_day, "Time": m_time, "Item": m_item, "Category": m_cat, "Area": "", "Link": "", "Status": "Planned", "Push to Expenses": False, "Remark": ""}])
+                updated_df = pd.concat([df_plan, new_row], ignore_index=True)
+                conn.update(spreadsheet=url, data=updated_df, worksheet="Planner")
+                st.cache_data.clear()
+                st.rerun()
+
+with col_ai:
+    with st.expander("🪄 AI Magic Polish", expanded=False):
+        st.write("Fixes sloppy names and missing areas!")
+        if st.button("Polish Existing Entries"):
+            with st.spinner("AI is researching locations..."):
+                # Pass a simplified list to AI to save tokens
+                items_to_fix = df_plan[['Item', 'Area']].to_dict('records')
+                prompt = f"""
+                Task: Standardize these travel items.
+                Input: {items_to_fix}
+                1. If 'Item' is casual (e.g., 'opera house'), change to official ('Sydney Opera House').
+                2. If 'Area' is empty or wrong, provide the correct city/neighborhood. If a flight, use 'Origin ✈️ Dest'.
+                Return ONLY JSON: [ {{"old_item": "...", "new_item": "...", "new_area": "..."}} ]
+                """
+                try:
+                    import json
+                    res = model.generate_content(prompt)
+                    updates = json.loads(res.text.replace("```json", "").replace("```", "").strip())
+                    
+                    for u in updates:
+                        idx = df_plan.index[df_plan['Item'] == u['old_item']].tolist()
+                        if idx:
+                            df_plan.at[idx[0], 'Item'] = u['new_item']
+                            df_plan.at[idx[0], 'Area'] = u['new_area']
+                    conn.update(spreadsheet=url, data=df_plan, worksheet="Planner")
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
         edited_plan = st.data_editor(
             df_plan,
             num_rows="dynamic",
@@ -329,6 +376,25 @@ with tab2:
 
     aud_to_hkd = get_aud_to_hkd_rate()
 
+    with st.expander("📱 Add Expense (Mobile Friendly)", expanded=False):
+    with st.form("mobile_add_exp"):
+        e_date = st.date_input("Date")
+        e_item = st.text_input("What did you buy?")
+        e_cost = st.number_input("Cost", min_value=0.0, format="%.2f")
+        e_curr = st.selectbox("Currency", ["AUD", "HKD"])
+        e_payer = st.selectbox("Paid By", trip_users)
+        e_split = st.selectbox("Split By", split_options)
+        e_cat = st.selectbox("Category", expense_categories)
+        
+        if st.form_submit_button("Add Expense"):
+            new_exp = pd.DataFrame([{"Date": e_date, "Category": e_cat, "Item": e_item, "Currency": e_curr, "Cost": e_cost, "Paid By": e_payer, "Split By": e_split, "Remark": ""}])
+            # Use drop to ensure we don't accidentally push math columns back to the sheet
+            clean_save_df = edited_exp.drop(columns=['Cost_HKD', 'Cost_AUD', 'Per_Person_Cost', 'Per_Person_HKD', 'Per_Person_AUD', 'Split_Count', 'Display_Total_HKD', 'Display_Total_AUD', 'Display_Person_HKD', 'Display_Person_AUD'], errors='ignore')
+            updated_exp = pd.concat([clean_save_df, new_exp], ignore_index=True)
+            conn.update(spreadsheet=url, data=updated_exp, worksheet="Expenses")
+            st.cache_data.clear()
+            st.rerun()
+
     # --- GLOBAL VIEW SETTINGS ---
     col1, col2 = st.columns([1, 1])
     with col1:
@@ -341,7 +407,7 @@ with tab2:
 
         required_exp_cols = [
             'Date', 'Category', 'Item', 'Currency', 'Cost', 
-            'Paid By', 'Split By', 'Settled', 'Remark'
+            'Paid By', 'Split By', 'Remark'
         ]
 
         for col in required_exp_cols:
@@ -480,7 +546,7 @@ with tab2:
             for combo in itertools.combinations(trip_users, r):
                 split_options.append(", ".join(combo))
 
-        base_display_cols = ['Date', 'Category', 'Item', 'Currency', 'Cost', 'Per_Person_Cost', 'Paid By', 'Split By', 'Settled', 'Remark']
+        base_display_cols = ['Date', 'Category', 'Item', 'Currency', 'Cost', 'Per_Person_Cost', 'Paid By', 'Split By', 'Remark']
 
         if show_conversion:
             if target_currency == "HKD":
@@ -509,8 +575,7 @@ with tab2:
                 "Display_Person_AUD": st.column_config.NumberColumn("Est. Person AUD", format="%.2f", disabled=True),
 
                 "Paid By": st.column_config.SelectboxColumn("Paid By", options=trip_users),
-                "Split By": st.column_config.SelectboxColumn("Split By", options=split_options),
-                "Settled": st.column_config.CheckboxColumn("Settled? ✅")
+                "Split By": st.column_config.SelectboxColumn("Split By", options=split_options)
             }
         )
 
