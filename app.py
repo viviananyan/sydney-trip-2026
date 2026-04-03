@@ -535,7 +535,7 @@ with tab2:
 
         st.divider()
 
-# --- 2B: THE CLEAN LEDGER ---
+        # --- 2B: THE CLEAN LEDGER ---
         st.write("### 📝 Ledger")
 
         with st.expander("📱 Add Expense (Mobile Friendly)", expanded=False):
