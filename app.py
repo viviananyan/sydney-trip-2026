@@ -375,7 +375,6 @@ with tab2:
     st.subheader("💸 Expense Tracker")
 
     aud_to_hkd = get_aud_to_hkd_rate()
-
     with st.expander("📱 Add Expense (Mobile Friendly)", expanded=False):
     with st.form("mobile_add_exp"):
         e_date = st.date_input("Date")
