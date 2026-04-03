@@ -197,8 +197,11 @@ with tab1:
     ]
 ),
                 "Status": st.column_config.SelectboxColumn("Status", options=["Planned", "Booked", "Done"]),
-                "Cost": st.column_config.NumberColumn("Est. Cost", format="$%.2f"),
-                "Lat": st.column_config.NumberColumn("Latitude", disabled=True),
+               # ... existing configs ...
+            "Cost": st.column_config.NumberColumn("Est. Cost", format="$%.2f"),
+            "Push to Expenses": st.column_config.CheckboxColumn("Push 💸", default=False), # NEW CHECKBOX
+            "Lat": st.column_config.NumberColumn("Latitude", disabled=True),
+            # ... existing configs ...
                 "Lon": st.column_config.NumberColumn("Longitude", disabled=True)
             }
         )
@@ -258,6 +261,60 @@ with tab1:
                         
                         if row['Remark']:
                             st.caption(f"↳ {row['Remark']}")
+
+# --- FINANCIAL SYNC (SELECTIVE) ---
+        st.divider()
+        st.write("### 💸 Financial Sync")
+        st.caption("Check the 'Push 💸' box on any items you want to send to your Expenses sheet.")
+        
+        if st.button("🔄 Sync Selected to Expenses"):
+            with st.spinner("Syncing selected items..."):
+                try:
+                    # 1. Filter ONLY for items where the checkbox is ticked
+                    sync_items = edited_plan[edited_plan['Push to Expenses'] == True]
+                    
+                    if sync_items.empty:
+                        st.warning("Please check the 'Push 💸' box next to the items you want to sync!")
+                    else:
+                        # 2. Read the Expenses sheet
+                        df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=0)
+                        if 'Item' not in df_exp.columns: df_exp['Item'] = ""
+                        
+                        existing_items = df_exp['Item'].astype(str).tolist()
+                        new_expenses = []
+                        
+                        for _, row in sync_items.iterrows():
+                            if str(row['Item']) not in existing_items:
+                                new_expenses.append({
+                                    "Date": row['Day'], 
+                                    "Category": row['Category'],
+                                    "Item": row['Item'],
+                                    "Amount": row['Cost'],
+                                    "Paid By": "TBD" 
+                                })
+                        
+                        # 3. Push to Expenses tab
+                        if new_expenses:
+                            updated_exp = pd.concat([df_exp, pd.DataFrame(new_expenses)], ignore_index=True)
+                            conn.update(spreadsheet=url, data=updated_exp, worksheet="Expenses")
+                            
+                            # 4. RESET PLANNER CHECKBOXES: Uncheck them so they don't sync again!
+                            edited_plan['Push to Expenses'] = False
+                            conn.update(spreadsheet=url, data=edited_plan, worksheet="Planner")
+                            
+                            st.success(f"Successfully synced {len(new_expenses)} items! Checkboxes have been reset.")
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.info("These items are already in your Expenses sheet. No duplicates added!")
+                            # Reset checkboxes anyway
+                            edited_plan['Push to Expenses'] = False
+                            conn.update(spreadsheet=url, data=edited_plan, worksheet="Planner")
+                            st.cache_data.clear()
+                            st.rerun()
+                            
+                except Exception as e:
+                    st.error(f"Failed to sync. Error: {e}")
         
 # --- TAB 2: EXPENSES & DEBTS ---
 with tab2:
