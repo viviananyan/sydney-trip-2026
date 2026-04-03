@@ -183,7 +183,7 @@ with tab1:
                 "End Day": st.column_config.SelectboxColumn("End Day (Stays)", options=day_options, width="small"),
                 "Time": st.column_config.TextColumn("Time", width="small"),
                 "Item": st.column_config.TextColumn("Item / Spot", required=True),
-                "Category": st.column_config.TextColumn("Category", disabled=True),
+                "Category": st.column_config.TextColumn("Category"),
                 "Status": st.column_config.SelectboxColumn("Status", options=["Planned", "Booked", "Done"]),
                 "Cost": st.column_config.NumberColumn("Est. Cost", format="$%.2f"),
                 "Lat": st.column_config.NumberColumn("Latitude", disabled=True),
