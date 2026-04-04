@@ -68,273 +68,87 @@ else:
 # --- 2. CREATE THE TABS ---
 tab1, tab2 = st.tabs(["🗓️ Planner & Map", "💰 Expenses"])
 
-# ==============================================================================
-# --- TAB 1: PLANNER ---
-# ==============================================================================
-with tab1:
-    st.subheader("📍 Smart Itinerary")
+import streamlit as st
+from streamlit_gsheets import GSheetsConnection
+import pandas as pd
+import google.generativeai as genai
 
-    try:
-        df_plan = conn.read(spreadsheet=url, worksheet="Planner", ttl=60)
-        required_cols = ['Day', 'End Day', 'Time', 'Item', 'Area', 'Category', 'Status', 'Push to Expenses', 'Link', 'Remark']
-        for col in required_cols:
-            if col not in df_plan.columns:
-                if col == 'Push to Expenses': df_plan[col] = False
-                else: df_plan[col] = None
+# --- INITIAL SETUP ---
+st.set_page_config(page_title="Sydney Trip 2026", layout="wide")
 
-        df_plan = df_plan[required_cols] 
-        df_plan = df_plan.dropna(how="all")
-        df_plan['Push to Expenses'] = df_plan['Push to Expenses'].astype(str).str.upper().map({'TRUE': True}).fillna(False)
+# Connect to Gemini
+genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+model = genai.GenerativeModel('gemini-pro')
 
-        for col in ['Day', 'End Day', 'Time', 'Item', 'Area', 'Category', 'Status', 'Link', 'Remark']:
-            df_plan[col] = df_plan[col].fillna("").astype(str)
+# Connect to Google Sheets
+conn = st.connection("gsheets", type=GSheetsConnection)
+df = conn.read(ttl=0)
 
-    except Exception as e:
-        st.error(f"Robot can't read the 'Planner' tab. Error: {e}")
-        df_plan = pd.DataFrame(columns=['Day', 'End Day', 'Time', 'Item', 'Area', 'Category', 'Status', 'Push to Expenses', 'Link', 'Remark'])
+# Ensure columns exist
+for col in ['name', 'area', 'status', 'day']:
+    if col not in df.columns:
+        df[col] = ""
 
-    tab_edit, tab_visual = st.tabs(["📝 Edit Itinerary", "📅 Visual Timeline"])
+# --- THE AI BRAIN ---
+def ask_gemini(user_input):
+    prompt = f"""
+    You are a Sydney travel expert. Extract info from this note: "{user_input}"
+    Return ONLY a comma-separated list: Polished Name, Specific Sydney Area, Day Number (or 'TBD')
+    Example: "coffee at gertrude and alice on day 2" -> Gertrude & Alice, Bondi, 2
+    Example: "taronga zoo" -> Taronga Zoo, Mosman, TBD
+    """
+    response = model.generate_content(prompt)
+    # Splits the response "Name, Area, Day" into a list
+    return [item.strip() for item in response.text.split(',')]
 
-    with tab_edit:
-        col_left, col_right = st.columns(2)
+st.title("🇦🇺 Sydney Trip Intelligence")
 
-        # --- TOOL 1: AI QUICK ADD ---
-        with col_left:
-            with st.expander("✨ AI Quick Add", expanded=True):
-                new_item = st.text_input("Add a new spot, tour, or booking:", placeholder="e.g. Blue Mountains Day Tour")
-                if st.button("Magic Add") and new_item:
-                    if not model:
-                        st.error("🔑 AI Key missing!")
-                    else:
-                        with st.spinner("Researching..."):
-                            current_plan_str = df_plan[['Day', 'Item']].to_string() if not df_plan.empty else "Empty"
-                            prompt = f"""
-                            Task: Add "{new_item}" to this Australian trip plan.
-                            Current Plan: {current_plan_str}
+# --- 1. AI QUICK-ADD BLOCK ---
+with st.container(border=True):
+    st.subheader("🪄 AI Smart Add")
+    user_note = st.text_input("Describe your plan...", placeholder="e.g. Opera House on Day 1")
+    
+    if st.button("Add to Itinerary") and user_note:
+        with st.spinner("Gemini is polishing your plan..."):
+            name, area, day = ask_gemini(user_note)
+            
+            # Logic: If day is a number, it's Scheduled. If it's TBD, it goes to TBD.
+            status = "Scheduled" if day.lower() != 'tbd' else "TBD"
+            
+            new_data = pd.DataFrame([{"name": name, "area": area, "status": status, "day": day}])
+            updated_df = pd.concat([df, new_data], ignore_index=True)
+            conn.update(data=updated_df)
+            st.success(f"Added {name} to {area}!")
+            st.rerun()
 
-                            1. Category: Exactly one of [✈️ Flight, 🏨 Stay, 🍴 Food, 🏖️ Nature, 🏛️ Landmark, 🛍️ Shopping, 🚗 Transport, 🎭 Entertainment, 💡 Other].
-                            2. Day: Group with close items. If unsure, assign 'TBD'.
-                            3. End Day: If it's a stay, infer checkout. Otherwise blank.
-                            4. Time: BEST time to visit. CRITICAL: strictly use English 24-hour (e.g. 15:00) or AM/PM (e.g. 03:00 PM). NO localized text.
-                            5. Area: General neighborhood. IF it is a flight or train, format it as "Origin ✈️ Destination" (e.g., "SYD ✈️ MEL").
-                            6. Link: A highly relevant URL (Google Maps for spots, Wikipedia for landmarks, etc).
-                            7. Remark: Maximum 3 words, or blank.
+# --- 2. THE GROUPED VIEW ---
+col1, col2 = st.columns(2)
 
-                            Return ONLY JSON:
-                            {{"category": "...", "day": "Day X or TBD", "end_day": "...", "time": "...", "area": "...", "link": "...", "remark": "..."}}
-                            """
-                            try:
-                                import json
-                                response = model.generate_content(prompt)
-                                res_text = response.text.replace("```json", "").replace("```", "").strip()
-                                ai_data = json.loads(res_text)
+with col1:
+    st.header("📍 TBD List (By Area)")
+    tbd_df = df[df['status'] == 'TBD']
+    if tbd_df.empty:
+        st.write("No unscheduled plans.")
+    else:
+        # This groups the list by the "area" column automatically
+        for area, group in tbd_df.groupby('area'):
+            with st.expander(f"🏘️ {area}", expanded=True):
+                for idx, row in group.iterrows():
+                    st.write(f"• {row['name']}")
 
-                                new_row = pd.DataFrame([{
-                                    "Day": ai_data['day'], "End Day": ai_data.get('end_day', ''),
-                                    "Time": ai_data.get('time', ''), "Item": new_item, "Area": ai_data.get('area', ''),
-                                    "Category": ai_data['category'], "Status": "Planned", 
-                                    "Push to Expenses": False, "Link": ai_data.get('link', ''), "Remark": ai_data.get('remark', '')
-                                }])
-                                updated_df = pd.concat([df_plan, new_row], ignore_index=True)
-                                conn.update(spreadsheet=url, data=updated_df, worksheet="Planner")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Error: {e}")
-
-        # --- TOOL 2: TBD AUTO-SCHEDULER ---
-        with col_right:
-            with st.expander("🗂️ TBD Auto-Scheduler", expanded=True):
-                tbd_items = df_plan[df_plan['Day'] == 'TBD']['Item'].tolist()
-                if not tbd_items:
-                    st.info("No 'TBD' items! Add some to your Bucket List.")
-                else:
-                    selected_tbds = st.multiselect("Select Bucket List items to schedule:", tbd_items)
-                    if st.button("🤖 Let AI Schedule These") and selected_tbds:
-                        with st.spinner("AI is analyzing your itinerary..."):
-                            scheduled_only = df_plan[df_plan['Day'] != 'TBD'][['Day', 'Time', 'Item', 'Area']].to_string()
-                            schedule_prompt = f"""
-                            I need to schedule these items: {selected_tbds}.
-                            Here is my current schedule: {scheduled_only}
-                            
-                            Task: Find the most logical Day and Time for EACH item based on geography and existing plans. 
-                            Time MUST strictly be in English 24-hour (15:00) or AM/PM (03:00 PM). NO localized text.
-                            
-                            Return ONLY a JSON list of objects:
-                            [ {{"item": "exact name", "day": "Day X", "time": "..."}} ]
-                            """
-                            try:
-                                import json
-                                response = model.generate_content(schedule_prompt)
-                                res_text = response.text.replace("```json", "").replace("```", "").strip()
-                                ai_updates = json.loads(res_text)
-
-                                for update in ai_updates:
-                                    idx = df_plan.index[df_plan['Item'] == update['item']].tolist()
-                                    if idx:
-                                        df_plan.at[idx[0], 'Day'] = update['day']
-                                        df_plan.at[idx[0], 'Time'] = update['time']
-
-                                conn.update(spreadsheet=url, data=df_plan, worksheet="Planner")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Error: {e}")
-
-        st.divider()
-        day_options = ["TBD", ""] + [f"Day {i}" for i in range(1, 15)]
-
-        # --- MOBILE-FRIENDLY ADD & AI POLISH ---
-        col_mob, col_ai = st.columns(2)
-        with col_mob:
-            with st.expander("📱 Mobile-Friendly Add", expanded=False):
-                with st.form("mobile_add_plan"):
-                    m_item = st.text_input("Item Name (e.g., Sydney Opera House)")
-                    m_day = st.selectbox("Day", day_options)
-                    m_cat = st.selectbox("Category", ["✈️ Flight", "🏨 Stay", "🍴 Food", "🏖️ Nature", "🏛️ Landmark", "💡 Other"])
-                    m_time = st.text_input("Time (HH:MM or blank)")
-                    if st.form_submit_button("Add to Plan"):
-                        new_row = pd.DataFrame([{"Day": m_day, "Time": m_time, "Item": m_item, "Category": m_cat, "Area": "", "Link": "", "Status": "Planned", "Push to Expenses": False, "Remark": ""}])
-                        updated_df = pd.concat([df_plan, new_row], ignore_index=True)
-                        conn.update(spreadsheet=url, data=updated_df, worksheet="Planner")
-                        st.cache_data.clear()
-                        st.rerun()
-
-        with col_ai:
-            with st.expander("🪄 AI Magic Polish", expanded=False):
-                st.write("Fixes sloppy names and missing areas!")
-                if st.button("Polish Existing Entries"):
-                    with st.spinner("AI is researching locations..."):
-                        items_to_fix = df_plan[['Item', 'Area']].to_dict('records')
-                        prompt = f"""
-                        Task: Standardize these travel items.
-                        Input: {items_to_fix}
-                        1. If 'Item' is casual (e.g., 'opera house'), change to official ('Sydney Opera House').
-                        2. If 'Area' is empty or wrong, provide the correct city/neighborhood. If a flight, use 'Origin ✈️ Dest'.
-                        Return ONLY JSON: [ {{"old_item": "...", "new_item": "...", "new_area": "..."}} ]
-                        """
-                        try:
-                            import json
-                            res = model.generate_content(prompt)
-                            updates = json.loads(res.text.replace("```json", "").replace("```", "").strip())
-                            
-                            for u in updates:
-                                idx = df_plan.index[df_plan['Item'] == u['old_item']].tolist()
-                                if idx:
-                                    df_plan.at[idx[0], 'Item'] = u['new_item']
-                                    df_plan.at[idx[0], 'Area'] = u['new_area']
-                            conn.update(spreadsheet=url, data=df_plan, worksheet="Planner")
-                            st.cache_data.clear()
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error: {e}")
-
-        # --- THE SPREADSHEET ---
-        edited_plan = st.data_editor(
-            df_plan,
-            num_rows="dynamic",
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Day": st.column_config.SelectboxColumn("Start", options=day_options, width="small"),
-                "End Day": st.column_config.SelectboxColumn("End", options=day_options, width="small"),
-                "Time": st.column_config.TextColumn("Time", width="small"),
-                "Item": st.column_config.TextColumn("Item / Spot", required=True),
-                "Area": st.column_config.TextColumn("Area", width="small"),
-                "Category": st.column_config.SelectboxColumn(
-                    "Category", 
-                    options=[
-                        "✈️ Flight", "🏨 Stay", "🍴 Food", "🏖️ Nature", 
-                        "🏛️ Landmark", "🛍️ Shopping", "🚗 Transport", 
-                        "🎭 Entertainment", "💡 Other"
-                    ]
-                ),
-                "Status": st.column_config.SelectboxColumn("Status", options=["Planned", "Booked", "Done"]),
-                "Push to Expenses": st.column_config.CheckboxColumn("Push 💸", default=False),
-                "Link": st.column_config.LinkColumn("URL/Link", display_text="🔗 Open")
-            }
-        )
-
-        col_save, col_sync = st.columns([1, 1])
-        with col_save:
-            if st.button("💾 Save Planner Changes", use_container_width=True):
-                conn.update(spreadsheet=url, data=edited_plan, worksheet="Planner")
-                st.success("Plan saved!")
-                st.cache_data.clear()
-                st.rerun()
-
-        with col_sync:
-            if st.button("🔄 Sync 'Push 💸' to Expenses", use_container_width=True):
-                with st.spinner("Syncing..."):
-                    sync_items = edited_plan[edited_plan['Push to Expenses'] == True]
-                    if sync_items.empty:
-                        st.warning("Check the 'Push 💸' boxes first!")
-                    else:
-                        df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=0)
-                        if 'Item' not in df_exp.columns: df_exp['Item'] = ""
-                        existing_items = df_exp['Item'].astype(str).tolist()
-                        new_expenses = []
-
-                        for _, row in sync_items.iterrows():
-                            if str(row['Item']) not in existing_items:
-                                new_expenses.append({
-                                    "Date": row['Day'], 
-                                    "Category": row['Category'],
-                                    "Item": row['Item'],
-                                    "Cost": 0.0,
-                                    "Paid By": "TBD" 
-                                })
-
-                        if new_expenses:
-                            updated_exp = pd.concat([df_exp, pd.DataFrame(new_expenses)], ignore_index=True)
-                            conn.update(spreadsheet=url, data=updated_exp, worksheet="Expenses")
-                            edited_plan['Push to Expenses'] = False
-                            conn.update(spreadsheet=url, data=edited_plan, worksheet="Planner")
-                            st.rerun()
-                        else:
-                            st.info("Already synced!")
-                            edited_plan['Push to Expenses'] = False
-                            conn.update(spreadsheet=url, data=edited_plan, worksheet="Planner")
-                            st.rerun()
-
-    with tab_visual:
-        if df_plan.empty:
-            st.info("Your itinerary is empty! Use the AI Quick Add to get started.")
-        else:
-            tbd_items = df_plan[df_plan['Day'] == 'TBD']
-            if not tbd_items.empty:
-                st.write("### 📌 Bucket List (Unscheduled)")
-                cols = st.columns(3)
-                for i, row in tbd_items.iterrows():
-                    with cols[i % 3]:
-                        area_str = f"\n*🏙️ {row['Area']}*" if row['Area'] else ""
-                        link_str = f"\n[🔗 Link]({row['Link']})" if row['Link'] else ""
-                        st.info(f"**{row['Category']} {row['Item']}**{area_str}{link_str}")
-                st.divider()
-
-            st.write("### 📅 Your Schedule")
-            def extract_day_num(day_str):
-                try:
-                    return int(str(day_str).lower().replace('day', '').strip())
-                except:
-                    return 999
-
-            scheduled_df = df_plan[(df_plan['Day'] != 'TBD') & (df_plan['Day'] != '')].copy()
-            scheduled_df['Day_Num'] = scheduled_df['Day'].apply(extract_day_num)
-            scheduled_df = scheduled_df.sort_values(by=['Day_Num', 'Time'])
-            days = scheduled_df['Day'].unique()
-
-            for day in days:
-                with st.expander(f"📍 {day}", expanded=True):
-                    day_items = scheduled_df[scheduled_df['Day'] == day]
-                    for _, row in day_items.iterrows():
-                        time_str = f"**{row['Time']}**" if row['Time'] else "*(Anytime)*"
-                        end_str = f" ➡️ *(Ends: {row['End Day']})*" if row['End Day'] else ""
-                        status_emoji = "✅" if row['Status'] in ['Booked', 'Done'] else "⏳"
-                        area_str = f" | 🏙️ *{row['Area']}*" if row['Area'] else ""
-                        link_str = f" | [🔗 Link]({row['Link']})" if row['Link'] else ""
-                        st.markdown(f"{time_str} | {row['Category']} **{row['Item']}** {end_str}{area_str}{link_str} | {status_emoji} {row['Status']}")
-                        if row['Remark']:
-                            st.caption(f"↳ {row['Remark']}")
-
+with col2:
+    st.header("🗓️ Itinerary (By Day)")
+    sched_df = df[df['status'] == 'Scheduled']
+    if sched_df.empty:
+        st.info("Nothing scheduled yet.")
+    else:
+        # Group by Day first, then by Area inside the day
+        for day, day_group in sched_df.sort_values('day').groupby('day'):
+            st.markdown(f"### 🗓️ Day {day}")
+            for area, area_group in day_group.groupby('area'):
+                st.caption(f"Neighborhood: {area}")
+                for idx, row in area_group.iterrows():
+                    st.info(f"**{row['name']}**")
 # ==============================================================================
 # --- TAB 2: EXPENSES & DEBTS ---
 # ==============================================================================
