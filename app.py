@@ -78,7 +78,7 @@ st.set_page_config(page_title="Sydney Trip 2026", layout="wide")
 
 # Connect to Gemini
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-model = genai.GenerativeModel('gemini-pro')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 # Connect to Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
