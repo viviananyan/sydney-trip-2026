@@ -131,7 +131,7 @@ with tab2:
         target_currency = st.radio("Display App In:", ["HKD", "AUD"], horizontal=True)
 
     try:
-        df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=60)
+        df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=0)
         required_exp_cols = ['Date', 'Category', 'Item', 'Currency', 'Cost', 'Paid By', 'Split By', 'Remark', 'Settled']
 
         for col in required_exp_cols:
@@ -145,9 +145,12 @@ with tab2:
         df_exp = df_exp[required_exp_cols]
         df_exp = df_exp.dropna(how="all", subset=['Item'])
 
-        # BULLETPROOF DATE FIX: Coerce bad data, drop empty dates, then format
-        df_exp['Date'] = pd.to_datetime(df_exp['Date'], errors='coerce')
-        df_exp = df_exp.dropna(subset=['Date'])
+# --- NEW DATE FIX ---
+        # Parse dates, handling mixed formats from Google Sheets
+        df_exp['Date'] = pd.to_datetime(df_exp['Date'], format='mixed', errors='coerce')
+        # If any date is missing or was 'None', replace it with today's date instead of dropping it
+        df_exp['Date'] = df_exp['Date'].fillna(pd.to_datetime('today'))
+        # Convert cleanly to YYYY-MM-DD format
         df_exp['Date'] = df_exp['Date'].dt.date
         
         df_exp['Settled'] = df_exp['Settled'].fillna(False).astype(bool)
@@ -251,7 +254,8 @@ with tab2:
                 if st.form_submit_button("💾 Save to Ledger", use_container_width=True):
                     if f_item and f_cost > 0:
                         new_row = pd.DataFrame([{
-                            "Date": f_date, "Category": f_cat, "Item": f_item, 
+                            "Date": f_date.strftime("%Y-%m-%d"), # <-- Force clean string format
+                            "Category": f_cat, "Item": f_item, 
                             "Currency": f_curr, "Cost": f_cost, "Paid By": f_payer, 
                             "Split By": f_split, "Remark": "", "Settled": False
                         }])
