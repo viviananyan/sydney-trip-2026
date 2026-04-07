@@ -22,7 +22,7 @@ split_options = ["All"] + trip_users + [f"{u1}, {u2}" for u1, u2 in itertools.co
 # Connect to Gemini
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash')
 else:
     st.error("🔑 AI Key missing! Please check your Streamlit Secrets.")
     model = None
@@ -107,7 +107,7 @@ with tab1:
                             
                             # Force the AI to return strict JSON data
                             model = genai.GenerativeModel(
-                                'gemini-1.5-flash', 
+                                'gemini-2.5-flash', 
                                 generation_config={"response_mime_type": "application/json"}
                             )
                             
