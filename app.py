@@ -396,10 +396,7 @@ with tab2:
                         st.info("Settled Up!")
 
             # --- CALCULATE WHO PAYS WHOM ---
-            st.write("#### 🎯 Smart Transfer Guide")
-            with st.expander("🤔 How is this calculated?", expanded=False):
-                st.write("**The Logic:** We add up everything you paid for the group, and subtract your 'fair share' of all the bills. \n\n* If you paid **more** than your share, you get money back.\n* If you paid **less** than your share, you owe money to the people who overpaid.")
-            
+            st.write("#### 🎯 Smart Transfer Guide")        
             st.caption("Here is exactly who needs to pay whom to settle all debts:")
             
             creditors = {user: amt for user, amt in balances_aud.items() if amt > 0.01}
