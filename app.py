@@ -239,6 +239,7 @@ with tab2:
                         conn.update(spreadsheet=url, data=updated_exp, worksheet="Expenses")
                         st.success("✅ Added successfully!")
                         st.cache_data.clear()
+                        import time
                         time.sleep(2)
                         st.rerun()
                     else:
@@ -282,26 +283,43 @@ with tab2:
                     if st.session_state.edit_idx == idx:
                         st.write(f"✏️ **Editing:** {row['Item']}")
                         with st.form(key=f"edit_form_{idx}"):
-                            e_item = st.text_input("Item", value=row['Item'])
-                            e_cost = st.number_input("Cost", value=float(row['Cost']), min_value=0.0)
+                            
+                            f_c1, f_c2 = st.columns(2)
+                            e_date = f_c1.date_input("Date", value=row['Date'], key=f"e_date_{idx}")
+                            e_cat = f_c2.selectbox("Category", expense_categories, index=expense_categories.index(row['Category']) if row['Category'] in expense_categories else 0, key=f"e_cat_{idx}")
+                            
+                            e_item = st.text_input("Item", value=row['Item'], key=f"e_item_{idx}")
                             
                             c1, c2 = st.columns(2)
-                            e_payer = c1.selectbox("Paid By", trip_users, index=trip_users.index(row['Paid By']) if row['Paid By'] in trip_users else 0)
-                            e_curr = c2.selectbox("Currency", ["AUD", "HKD"], index=0 if row['Currency'] == "AUD" else 1)
+                            e_cost = c1.number_input("Cost", value=float(row['Cost']), min_value=0.0, key=f"e_cost_{idx}")
+                            e_curr = c2.selectbox("Currency", ["AUD", "HKD"], index=0 if row['Currency'] == "AUD" else 1, key=f"e_curr_{idx}")
+                            
+                            c3, c4 = st.columns(2)
+                            e_payer = c3.selectbox("Paid By", trip_users, index=trip_users.index(row['Paid By']) if row['Paid By'] in trip_users else 0, key=f"e_payer_{idx}")
+                            e_split = c4.selectbox("Split By", split_options, index=split_options.index(row['Split By']) if row['Split By'] in split_options else 0, key=f"e_split_{idx}")
                             
                             col_sub1, col_sub2 = st.columns(2)
                             if col_sub1.form_submit_button("💾 Save Changes", use_container_width=True):
-                                df_exp.at[idx, 'Item'] = e_item
-                                df_exp.at[idx, 'Cost'] = e_cost
-                                df_exp.at[idx, 'Paid By'] = e_payer
-                                df_exp.at[idx, 'Currency'] = e_curr
-                                
-                                clean_save_df = df_exp.drop(columns=['Cost_HKD', 'Cost_AUD', 'Split_Count'], errors='ignore')
-                                conn.update(spreadsheet=url, data=clean_save_df, worksheet="Expenses")
-                                st.session_state.edit_idx = None
-                                st.cache_data.clear()
-                                time.sleep(2)
-                                st.rerun()
+                                with st.spinner("Syncing to Google Sheets..."):
+                                    # Update exactly this row in the master dataframe
+                                    df_exp.loc[idx, 'Date'] = e_date
+                                    df_exp.loc[idx, 'Category'] = e_cat
+                                    df_exp.loc[idx, 'Item'] = e_item
+                                    df_exp.loc[idx, 'Cost'] = e_cost
+                                    df_exp.loc[idx, 'Currency'] = e_curr
+                                    df_exp.loc[idx, 'Paid By'] = e_payer
+                                    df_exp.loc[idx, 'Split By'] = e_split
+                                    
+                                    # Drop temp columns and force Date to string before saving
+                                    clean_save_df = df_exp.drop(columns=['Cost_HKD', 'Cost_AUD', 'Split_Count'], errors='ignore')
+                                    clean_save_df['Date'] = clean_save_df['Date'].astype(str)
+                                    
+                                    conn.update(spreadsheet=url, data=clean_save_df, worksheet="Expenses")
+                                    st.session_state.edit_idx = None
+                                    st.cache_data.clear()
+                                    import time
+                                    time.sleep(2)
+                                    st.rerun()
                                 
                             if col_sub2.form_submit_button("❌ Cancel", use_container_width=True):
                                 st.session_state.edit_idx = None
@@ -331,9 +349,11 @@ with tab2:
                                 st.rerun()
                             if st.button("🗑️", key=f"del_btn_{idx}", help="Delete record"):
                                 clean_df = df_exp.drop(index=idx).drop(columns=['Cost_HKD', 'Cost_AUD', 'Split_Count'], errors='ignore')
+                                clean_df['Date'] = clean_df['Date'].astype(str)
                                 conn.update(spreadsheet=url, data=clean_df, worksheet="Expenses")
                                 st.toast(f"Deleted {row['Item']}")
                                 st.cache_data.clear()
+                                import time
                                 time.sleep(2)
                                 st.rerun()
 
@@ -377,6 +397,9 @@ with tab2:
 
             # --- CALCULATE WHO PAYS WHOM ---
             st.write("#### 🎯 Smart Transfer Guide")
+            with st.expander("🤔 How is this calculated?", expanded=False):
+                st.write("**The Logic:** We add up everything you paid for the group, and subtract your 'fair share' of all the bills. \n\n* If you paid **more** than your share, you get money back.\n* If you paid **less** than your share, you owe money to the people who overpaid.")
+            
             st.caption("Here is exactly who needs to pay whom to settle all debts:")
             
             creditors = {user: amt for user, amt in balances_aud.items() if amt > 0.01}
@@ -407,9 +430,11 @@ with tab2:
                 with st.spinner("Updating records..."):
                     df_exp['Settled'] = True
                     clean_save_df = df_exp.drop(columns=['Cost_HKD', 'Cost_AUD', 'Split_Count'], errors='ignore')
+                    clean_save_df['Date'] = clean_save_df['Date'].astype(str)
                     conn.update(spreadsheet=url, data=clean_save_df, worksheet="Expenses")
                     st.success("All debts settled!")
                     st.cache_data.clear()
+                    import time
                     time.sleep(2)
                     st.rerun()
 
