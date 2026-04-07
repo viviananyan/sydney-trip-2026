@@ -7,6 +7,7 @@ import itertools
 import plotly.express as px
 import google.generativeai as genai
 import requests
+import time
 
 # ==============================================================================
 # --- INITIAL SETUP & CONFIGURATION ---
@@ -256,9 +257,19 @@ with tab2:
                         }])
                         clean_df = df_exp.drop(columns=['Cost_HKD', 'Cost_AUD', 'Split_Count'], errors='ignore')
                         updated_exp = pd.concat([clean_df, new_row], ignore_index=True)
+                        
+                        # Send update to Google Sheets
                         conn.update(spreadsheet=url, data=updated_exp, worksheet="Expenses")
-                        st.success("Added successfully!")
+                        
+                        st.success("✅ Added successfully! Syncing with Google Sheets...")
+                        
+                        # Clear the cache
                         st.cache_data.clear()
+                        
+                        # Give Google Sheets 2 seconds to process the update
+                        time.sleep(2)
+                        
+                        # Reload the page
                         st.rerun()
                     else:
                         st.error("Please enter an item name and a cost greater than 0.")
