@@ -235,7 +235,7 @@ with tab2:
         # 1. NEW ENTRY FORM (Stacked on top)
         with st.expander("➕ Add New Expense", expanded=False):
             with st.form("new_entry_form"):
-                f_date = st.date_input("Date", default=datetime.date.today())
+                f_date = st.date_input("Date", value=datetime.date.today())
                 f_item = st.text_input("Item / Description", placeholder="e.g., Dinner at Mamak")
                 f_cat = st.selectbox("Category", expense_categories)
                 
