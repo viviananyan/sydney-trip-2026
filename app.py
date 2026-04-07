@@ -90,57 +90,75 @@ with tab1:
         ai_tab1, ai_tab2 = st.tabs(["➕ Smart Add", "🪄 Suggest Schedule"])
         
         with ai_tab1:
-            st.write("**Paste anything here!** (e.g., 'Opera house tour 2pm', a Google Maps link, or 'need to book that cool airbnb in surry hills')")
+            st.write("**Paste anything here!** (e.g., 'QT Bondi from day 1-7', 'Australian Museum on day 7')")
             raw_input = st.text_area("Raw Details:")
             force_cat = st.selectbox("Category Hint (Optional)", ["Auto-Detect", "Stay", "Flight", "Tour", "Food", "Activity"])
             
             if st.button("🚀 Process & Add to Itinerary", use_container_width=True):
                 if raw_input:
-                    with st.spinner("AI is analyzing, formatting, and checking booking needs..."):
-                        # ==========================================
-                        # LLM INTEGRATION POINT:
-                        # In a live app, you would send `raw_input` to Gemini here.
-                        # Prompt: "Extract: Official Name, Category, Area, Maps Search Link, and Boolean if booking is required. Return strictly as JSON."
-                        # ==========================================
-                        
-                        # --- MOCK AI RESPONSE (Replace with actual genai call) ---
-                        import time; time.sleep(1.5) # Simulating AI thinking
-                        mock_ai_data = {
-                            "Item": f"Cleaned: {raw_input[:15]}...",
-                            "Category": force_cat if force_cat != "Auto-Detect" else "Activity",
-                            "Area": "Sydney (AI Detected)",
-                            "Maps Link": f"https://www.google.com/maps/search/?api=1&query=Sydney",
-                            "Booking Needed": True if "book" in raw_input.lower() or "airbnb" in raw_input.lower() or "flight" in raw_input.lower() else False,
-                            "Day": "TBC", "Time": "", "Notes": "Auto-added via AI."
-                        }
-                        
-                        # Add to Planner
-                        new_plan_row = pd.DataFrame([mock_ai_data])
-                        updated_plan = pd.concat([df_plan, new_plan_row], ignore_index=True)
-                        conn.update(spreadsheet=url, data=updated_plan, worksheet="Planner")
-                        
-                        # --- CROSS-TAB SYNC: ADD TO LEDGER IF BOOKING NEEDED ---
-                        if mock_ai_data["Booking Needed"]:
-                            try:
-                                df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=5)
-                                new_exp_row = pd.DataFrame([{
-                                    "Date": str(datetime.date.today()), "Category": mock_ai_data["Category"], 
-                                    "Item": f"Booking Deposit: {mock_ai_data['Item']}", "Currency": "AUD", 
-                                    "Cost": 0.0, "Paid By": trip_users[0], "Split By": "All", 
-                                    "Remark": "Auto-generated from Planner", "Settled": False
-                                }])
-                                clean_exp = df_exp.drop(columns=['Cost_HKD', 'Cost_AUD', 'Split_Count'], errors='ignore')
-                                updated_exp = pd.concat([clean_exp, new_exp_row], ignore_index=True)
-                                conn.update(spreadsheet=url, data=updated_exp, worksheet="Expenses")
-                                st.toast("Ledger updated: Pending booking expense added!")
-                            except Exception as e:
-                                st.error(f"Could not cross-sync to Expenses: {e}")
-                        
-                        st.success(f"Added {mock_ai_data['Item']}!")
-                        st.cache_data.clear()
-                        time.sleep(1)
-                        st.rerun()
-
+                    with st.spinner("Gemini is analyzing, formatting, and checking booking needs..."):
+                        try:
+                            # 1. SETUP THE REAL AI
+                            import google.generativeai as genai
+                            import json
+                            
+                            # Make sure your API key is in Streamlit secrets!
+                            genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+                            
+                            # Force the AI to return strict JSON data
+                            model = genai.GenerativeModel(
+                                'gemini-1.5-flash', 
+                                generation_config={"response_mime_type": "application/json"}
+                            )
+                            
+                            # 2. THE SYSTEM PROMPT (The "Brain")
+                            prompt = f"""
+                            You are an expert Sydney travel agent. Analyze this raw user input: "{raw_input}"
+                            
+                            Extract the data and return a JSON object with EXACTLY these keys:
+                            - "Item": The official, clean name of the place or event (e.g., "QT Bondi", "Australian Museum"). Do NOT include the day or time in this field.
+                            - "Category": {f'Use "{force_cat}"' if force_cat != 'Auto-Detect' else 'Categorize as exactly one of: Stay, Flight, Tour, Food, or Activity.'}
+                            - "Area": The specific, precise neighborhood or district (e.g., "Bondi Beach", "Sydney CBD", "Darlinghurst"). Do NOT just say "Sydney".
+                            - "Maps Link": A valid Google Maps search URL using the official name and area. Format exactly like: "https://www.google.com/maps/search/?api=1&query=QT+Bondi+Bondi+Beach"
+                            - "Booking Needed": boolean (true/false). True if it's a stay, flight, tour, or requires tickets/reservations.
+                            - "Day": The specific day(s) mentioned (e.g., "Day 1-7", "Day 7", "Oct 5"). If none is mentioned, return "TBC".
+                            - "Time": The time mentioned, or "".
+                            - "Notes": Any extra context provided by the user.
+                            """
+                            
+                            # 3. GENERATE AND PARSE RESPONSE
+                            response = model.generate_content(prompt)
+                            ai_data = json.loads(response.text)
+                            
+                            # 4. SAVE TO GOOGLE SHEETS
+                            new_plan_row = pd.DataFrame([ai_data])
+                            updated_plan = pd.concat([df_plan, new_plan_row], ignore_index=True)
+                            conn.update(spreadsheet=url, data=updated_plan, worksheet="Planner")
+                            
+                            # 5. CROSS-TAB SYNC (Add to Ledger if booking needed)
+                            if ai_data.get("Booking Needed", False):
+                                try:
+                                    df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=5)
+                                    new_exp_row = pd.DataFrame([{
+                                        "Date": str(datetime.date.today()), "Category": ai_data["Category"], 
+                                        "Item": f"Booking: {ai_data['Item']}", "Currency": "AUD", 
+                                        "Cost": 0.0, "Paid By": trip_users[0], "Split By": "All", 
+                                        "Remark": "Auto-generated from AI Planner", "Settled": False
+                                    }])
+                                    clean_exp = df_exp.drop(columns=['Cost_HKD', 'Cost_AUD', 'Split_Count'], errors='ignore')
+                                    updated_exp = pd.concat([clean_exp, new_exp_row], ignore_index=True)
+                                    conn.update(spreadsheet=url, data=updated_exp, worksheet="Expenses")
+                                    st.toast("Ledger updated: Pending booking expense added!")
+                                except Exception as e:
+                                    st.warning(f"Added to planner, but couldn't sync to Expenses: {e}")
+                            
+                            st.success(f"✅ Added {ai_data['Item']} to {ai_data['Area']}!")
+                            st.cache_data.clear()
+                            import time; time.sleep(1)
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"AI encountered an error: {e}")
         with ai_tab2:
             st.write("Let AI analyze your **TBC** items and suggest how to group them by area and day.")
             if st.button("🧠 Generate Schedule Suggestions", use_container_width=True):
