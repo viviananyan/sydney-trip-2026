@@ -66,91 +66,71 @@ with tab1:
     
     # --- 1. DATA LOADING & CLEANING ---
     try:
-        # Using a 10-minute cache (600s) to prevent Google API rate limits!
+        # 10-minute cache to prevent Google API rate limits
         df_plan = conn.read(spreadsheet=url, worksheet="Planner", ttl=600)
         
-        required_plan_cols = ['Day', 'Time', 'Item', 'Category', 'Area', 'Maps Link', 'Booking Needed', 'Notes']
+        required_plan_cols = ['Day', 'Time', 'Item Emoji', 'Item', 'Category', 'Area Emoji', 'Area', 'Maps Link', 'Booked', 'Notes']
         for col in required_plan_cols:
             if col not in df_plan.columns:
-                if col == 'Booking Needed': df_plan[col] = False
+                if col == 'Booked': df_plan[col] = False
                 elif col == 'Day': df_plan[col] = "TBC"
+                elif col in ['Item Emoji', 'Area Emoji']: df_plan[col] = "📍"
                 else: df_plan[col] = ""
                 
         df_plan = df_plan[required_plan_cols].dropna(how="all", subset=['Item'])
-        df_plan['Booking Needed'] = df_plan['Booking Needed'].fillna(False).astype(bool)
+        df_plan['Booked'] = df_plan['Booked'].fillna(False).astype(bool)
         df_plan['Day'] = df_plan['Day'].replace("", "TBC").fillna("TBC")
         df_plan['Category'] = df_plan['Category'].replace("", "Activity").fillna("Activity")
 
     except Exception as e:
-        st.error(f"Error loading Planner tab: {e}")
+        st.error(f"Error loading Planner tab. Did you update the headers? Details: {e}")
         st.stop()
 
     # --- 2. AI SMART ADD & SCHEDULING TOOLKIT ---
     with st.expander("✨ AI Planning Assistant", expanded=False):
         ai_tab1, ai_tab2 = st.tabs(["➕ Smart Add", "🪄 Suggest Schedule"])
         
+        # --- AI TAB 1: SMART ADD ---
         with ai_tab1:
             st.write("**Paste anything here!** (e.g., 'QT Bondi from day 1-7', 'Australian Museum on day 7')")
-            raw_input = st.text_area("Raw Details:")
+            raw_input = st.text_area("Raw Details:", key="ai_raw_input")
             force_cat = st.selectbox("Category Hint (Optional)", ["Auto-Detect", "Stay", "Flight", "Tour", "Food", "Activity"])
             
             if st.button("🚀 Process & Add to Itinerary", use_container_width=True):
                 if raw_input:
-                    with st.spinner("Gemini is analyzing, formatting, and checking booking needs..."):
+                    with st.spinner("Gemini is pinpointing locations and generating emojis..."):
                         try:
-                            # 1. SETUP THE REAL AI
                             import google.generativeai as genai
                             import json
                             
-                            # Make sure your API key is in Streamlit secrets!
                             genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-                            
-                            # Force the AI to return strict JSON data
                             model = genai.GenerativeModel(
                                 'gemini-2.5-flash', 
                                 generation_config={"response_mime_type": "application/json"}
                             )
                             
-                            # 2. THE SYSTEM PROMPT (The "Brain")
                             prompt = f"""
                             You are an expert Sydney travel agent. Analyze this raw user input: "{raw_input}"
                             
                             Extract the data and return a JSON object with EXACTLY these keys:
-                            - "Item": The official, clean name of the place or event (e.g., "QT Bondi", "Australian Museum"). Do NOT include the day or time in this field.
+                            - "Item Emoji": A single emoji representing the specific item (e.g., 🏛️ for museum, 🛏️ for hotel).
+                            - "Item": The official, clean name of the place (e.g., "QT Bondi", "Australian Museum"). NO days or times here.
                             - "Category": {f'Use "{force_cat}"' if force_cat != 'Auto-Detect' else 'Categorize as exactly one of: Stay, Flight, Tour, Food, or Activity.'}
-                            - "Area": The specific, precise neighborhood or district (e.g., "Bondi Beach", "Sydney CBD", "Darlinghurst"). Do NOT just say "Sydney".
-                            - "Maps Link": A valid Google Maps search URL using the official name and area. Format exactly like: "https://www.google.com/maps/search/?api=1&query=QT+Bondi+Bondi+Beach"
-                            - "Booking Needed": boolean (true/false). True if it's a stay, flight, tour, or requires tickets/reservations.
+                            - "Area Emoji": A single emoji representing the vibe of the area (e.g., 🏖️ for Bondi, ⛴️ for Circular Quay).
+                            - "Area": The highly specific micro-neighborhood (e.g., "Bondi Beach", "Circular Quay", "Surry Hills"). DO NOT just say "Sydney CBD" if a more specific area exists.
+                            - "Maps Link": A valid Google Maps search URL using the official name and precise area. 
+                            - "Booked": Always return false.
                             - "Day": The specific day(s) mentioned (e.g., "Day 1-7", "Day 7", "Oct 5"). If none is mentioned, return "TBC".
                             - "Time": The time mentioned, or "".
                             - "Notes": Any extra context provided by the user.
                             """
                             
-                            # 3. GENERATE AND PARSE RESPONSE
                             response = model.generate_content(prompt)
                             ai_data = json.loads(response.text)
                             
-                            # 4. SAVE TO GOOGLE SHEETS
                             new_plan_row = pd.DataFrame([ai_data])
                             updated_plan = pd.concat([df_plan, new_plan_row], ignore_index=True)
                             conn.update(spreadsheet=url, data=updated_plan, worksheet="Planner")
-                            
-                            # 5. CROSS-TAB SYNC (Add to Ledger if booking needed)
-                            if ai_data.get("Booking Needed", False):
-                                try:
-                                    df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=5)
-                                    new_exp_row = pd.DataFrame([{
-                                        "Date": str(datetime.date.today()), "Category": ai_data["Category"], 
-                                        "Item": f"Booking: {ai_data['Item']}", "Currency": "AUD", 
-                                        "Cost": 0.0, "Paid By": trip_users[0], "Split By": "All", 
-                                        "Remark": "Auto-generated from AI Planner", "Settled": False
-                                    }])
-                                    clean_exp = df_exp.drop(columns=['Cost_HKD', 'Cost_AUD', 'Split_Count'], errors='ignore')
-                                    updated_exp = pd.concat([clean_exp, new_exp_row], ignore_index=True)
-                                    conn.update(spreadsheet=url, data=updated_exp, worksheet="Expenses")
-                                    st.toast("Ledger updated: Pending booking expense added!")
-                                except Exception as e:
-                                    st.warning(f"Added to planner, but couldn't sync to Expenses: {e}")
                             
                             st.success(f"✅ Added {ai_data['Item']} to {ai_data['Area']}!")
                             st.cache_data.clear()
@@ -159,22 +139,35 @@ with tab1:
                             
                         except Exception as e:
                             st.error(f"AI encountered an error: {e}")
+
+        # --- AI TAB 2: SMART SCHEDULE ---
         with ai_tab2:
-            st.write("Let AI analyze your **TBC** items and suggest how to group them by area and day.")
-            if st.button("🧠 Generate Schedule Suggestions", use_container_width=True):
-                with st.spinner("AI is calculating distances and optimizing your trip..."):
-                    # ==========================================
-                    # LLM INTEGRATION POINT:
-                    # Send `df_plan.to_dict()` to Gemini here.
-                    # Prompt: "Look at these items. Group items in similar 'Areas' onto the same 'Day'. Output a friendly text suggestion, do NOT output code."
-                    # ==========================================
-                    st.info("""
-                    **🤖 AI Suggestions:**
-                    * **Day 2:** Move 'Bondi Beach' and 'Icebergs Dining' to Day 2, as they are in the same area.
-                    * **Day 3:** You have 'Opera House' (CBD) and 'Taronga Zoo' (North Shore) on the same day. Consider grouping the Zoo with your Manly ferry trip!
-                    
-                    *(Review these suggestions and edit your items below!)*
-                    """)
+            st.write("Let AI analyze your actual itinerary and suggest how to group things based on walking distance and proximity!")
+            if st.button("🧠 Analyze My Itinerary", use_container_width=True):
+                with st.spinner("AI is calculating physical proximity of your spots..."):
+                    try:
+                        import google.generativeai as genai
+                        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+                        model = genai.GenerativeModel('gemini-2.5-flash')
+                        
+                        # Give the AI your actual data to analyze
+                        trip_data_str = df_plan[['Day', 'Item', 'Area']].to_json(orient="records")
+                        
+                        schedule_prompt = f"""
+                        You are a master travel planner for a trip to Sydney. Here is the user's current itinerary data: 
+                        {trip_data_str}
+                        
+                        Look carefully at the "Area" for each item. Group spots that are within walking distance or very short transit of each other onto the same day (e.g., Circular Quay is right next to the CBD and The Rocks). 
+                        
+                        Give the user 3 to 4 actionable, bulleted suggestions on how to arrange or rearrange their schedule for optimal logistics. Keep it friendly and concise. Do NOT write any code.
+                        """
+                        
+                        response = model.generate_content(schedule_prompt)
+                        st.info("🤖 **AI Insights & Proximity Grouping:**")
+                        st.write(response.text)
+                        
+                    except Exception as e:
+                        st.error(f"AI failed to generate a schedule: {e}")
 
     st.divider()
 
@@ -198,48 +191,46 @@ with tab1:
     if filt_area != "All Areas": view_plan = view_plan[view_plan['Area'] == filt_area]
     if filt_cat != "All Categories": view_plan = view_plan[view_plan['Category'] == filt_cat]
 
-    # Session state for planner editing
     if 'plan_edit_idx' not in st.session_state:
         st.session_state.plan_edit_idx = None
 
     # --- 4. THE STACKED ITINERARY FEED ---
-    category_emojis = {"Stay": "🏨", "Flight": "✈️", "Tour": "🚌", "Food": "🍽️", "Activity": "🎟️"}
-
     if view_plan.empty:
         st.info("No plans match this filter. Use the AI Smart Add above!")
     else:
-        # Function to render a single card
         def render_plan_card(idx, row):
             with st.container(border=True):
-                # EDIT MODE
+                # FULL EDIT MODE
                 if st.session_state.plan_edit_idx == idx:
                     with st.form(key=f"edit_plan_{idx}"):
                         st.write(f"✏️ **Editing:** {row['Item']}")
-                        e_item = st.text_input("Official Name", value=row['Item'])
+                        
+                        col_i1, col_i2 = st.columns([1, 5])
+                        e_i_emo = col_i1.text_input("Item Emoji", value=row.get('Item Emoji', '📍'))
+                        e_item = col_i2.text_input("Official Name", value=row['Item'])
                         
                         ec1, ec2, ec3 = st.columns(3)
-                        e_day = ec1.text_input("Day (e.g., Day 1, TBC)", value=row['Day'])
+                        e_day = ec1.text_input("Day (e.g., Day 1)", value=row['Day'])
                         e_time = ec2.text_input("Time", value=row['Time'])
                         e_cat = ec3.selectbox("Category", ["Stay", "Flight", "Tour", "Food", "Activity", "Other"], 
                                               index=["Stay", "Flight", "Tour", "Food", "Activity", "Other"].index(row['Category']) if row['Category'] in ["Stay", "Flight", "Tour", "Food", "Activity", "Other"] else 5)
                         
-                        ec4, ec5 = st.columns(2)
-                        e_area = ec4.text_input("Area / District", value=row['Area'])
-                        e_link = ec5.text_input("Maps Link", value=row['Maps Link'])
+                        ec4, ec5 = st.columns([2, 5])
+                        e_a_emo = ec4.text_input("Area Emoji", value=row.get('Area Emoji', '📍'))
+                        e_area = ec5.text_input("Area / District", value=row['Area'])
                         
-                        e_book = st.checkbox("Booking/Tickets Needed?", value=row['Booking Needed'])
-                        e_notes = st.text_area("Notes (Meetup spot, check-in times, etc.)", value=row['Notes'])
+                        e_link = st.text_input("Maps Link", value=row['Maps Link'])
                         
                         sub1, sub2 = st.columns(2)
-                        if sub1.form_submit_button("💾 Save", use_container_width=True):
+                        if sub1.form_submit_button("💾 Save Full Edit", use_container_width=True):
+                            df_plan.loc[idx, 'Item Emoji'] = e_i_emo
                             df_plan.loc[idx, 'Item'] = e_item
                             df_plan.loc[idx, 'Day'] = e_day
                             df_plan.loc[idx, 'Time'] = e_time
                             df_plan.loc[idx, 'Category'] = e_cat
+                            df_plan.loc[idx, 'Area Emoji'] = e_a_emo
                             df_plan.loc[idx, 'Area'] = e_area
                             df_plan.loc[idx, 'Maps Link'] = e_link
-                            df_plan.loc[idx, 'Booking Needed'] = e_book
-                            df_plan.loc[idx, 'Notes'] = e_notes
                             
                             conn.update(spreadsheet=url, data=df_plan, worksheet="Planner")
                             st.session_state.plan_edit_idx = None
@@ -250,30 +241,43 @@ with tab1:
                             st.session_state.plan_edit_idx = None
                             st.rerun()
                 
-                # NORMAL VIEW MODE
+                # NORMAL VIEW MODE (With Inline Notes/Booking)
                 else:
-                    icon = category_emojis.get(row['Category'], "📍")
-                    book_badge = "🚨 **Needs Booking**" if row['Booking Needed'] else ""
-                    
-                    c1, c2 = st.columns([5, 1])
+                    c1, c2 = st.columns([6, 1])
                     with c1:
+                        # Dynamic Title with tailored emojis
+                        title_str = f"#### {row.get('Item Emoji', '📍')} {row['Item']}"
                         if row['Maps Link']:
-                            st.markdown(f"#### [{icon} {row['Item']}]({row['Maps Link']})")
+                            st.markdown(f"[{title_str}]({row['Maps Link']})")
                         else:
-                            st.markdown(f"#### {icon} {row['Item']}")
+                            st.markdown(title_str)
                         
-                        st.write(f"**{row['Day']}** | 🕒 {row['Time']} | 🏙️ {row['Area']}")
-                        if book_badge: st.warning(book_badge)
-                        if row['Notes']: st.caption(f"📝 {row['Notes']}")
+                        st.write(f"**{row['Day']}** | 🕒 {row['Time']} | {row.get('Area Emoji', '📍')} {row['Area']}")
                     
                     with c2:
-                        if st.button("✏️", key=f"p_edit_{idx}"):
+                        # Stack full edit & delete buttons on the right
+                        if st.button("⚙️", key=f"p_edit_{idx}", help="Full Edit"):
                             st.session_state.plan_edit_idx = idx
                             st.rerun()
-                        if st.button("🗑️", key=f"p_del_{idx}"):
+                        if st.button("🗑️", key=f"p_del_{idx}", help="Delete"):
                             clean_df = df_plan.drop(index=idx)
                             conn.update(spreadsheet=url, data=clean_df, worksheet="Planner")
-                            st.toast(f"Deleted {row['Item']}")
+                            st.cache_data.clear()
+                            import time; time.sleep(1)
+                            st.rerun()
+                    
+                    # --- INLINE QUICK EDITS (Notes & Booked Status) ---
+                    with st.form(key=f"quick_edit_{idx}", border=False):
+                        q1, q2, q3 = st.columns([2.5, 4, 2.5])
+                        
+                        new_booked = q1.checkbox("✅ Booked", value=bool(row['Booked']))
+                        new_notes = q2.text_input("Remarks / Notes", value=str(row['Notes']), label_visibility="collapsed", placeholder="Add quick notes here...")
+                        
+                        if q3.form_submit_button("Save Notes", use_container_width=True):
+                            df_plan.loc[idx, 'Booked'] = new_booked
+                            df_plan.loc[idx, 'Notes'] = new_notes
+                            conn.update(spreadsheet=url, data=df_plan, worksheet="Planner")
+                            st.toast("Notes saved!")
                             st.cache_data.clear()
                             import time; time.sleep(1)
                             st.rerun()
@@ -288,7 +292,6 @@ with tab1:
                 st.write(f"### {group_name}")
                 for idx, row in group_df.iterrows():
                     render_plan_card(idx, row)
-
 # ==============================================================================
 # --- TAB 2: EXPENSES & DEBTS ---
 # ==============================================================================
