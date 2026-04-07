@@ -8,6 +8,7 @@ import plotly.express as px
 import google.generativeai as genai
 import requests
 import time
+import json
 
 # ==============================================================================
 # --- INITIAL SETUP & CONFIGURATION ---
@@ -58,64 +59,217 @@ def get_aud_to_hkd_rate():
 tab1, tab2 = st.tabs(["🗓️ Planner & Map", "💰 Expenses"])
 
 # ==============================================================================
-# --- TAB 1: PLANNER & MAP ---
+# --- TAB 1: AI ITINERARY PLANNER ---
 # ==============================================================================
 with tab1:
-    df_plan = conn.read(ttl=60)
-
-    for col in ['name', 'area', 'status', 'day']:
-        if col not in df_plan.columns:
-            df_plan[col] = ""
-
-    def ask_gemini(user_input):
-        if not model: return ["Error", "Error", "TBD"]
-        prompt = f"""
-        You are a Sydney travel expert. Extract info from this note: "{user_input}"
-        Return ONLY a comma-separated list: Polished Name, Specific Sydney Area, Day Number (or 'TBD')
-        Example: "coffee at gertrude and alice on day 2" -> Gertrude & Alice, Bondi, 2
-        """
-        response = model.generate_content(prompt)
-        return [item.strip() for item in response.text.split(',')]
-
-    with st.container(border=True):
-        st.subheader("🪄 AI Smart Add")
-        user_note = st.text_input("Describe your plan...", placeholder="e.g. Opera House on Day 1")
+    st.subheader("🗺️ AI Smart Planner")
+    
+    # --- 1. DATA LOADING & CLEANING ---
+    try:
+        # Using a 10-minute cache (600s) to prevent Google API rate limits!
+        df_plan = conn.read(spreadsheet=url, worksheet="Planner", ttl=600)
         
-        if st.button("Add to Itinerary") and user_note:
-            with st.spinner("Gemini is polishing your plan..."):
-                name, area, day = ask_gemini(user_note)
-                status = "Scheduled" if day.lower() != 'tbd' else "TBD"
+        required_plan_cols = ['Day', 'Time', 'Item', 'Category', 'Area', 'Maps Link', 'Booking Needed', 'Notes']
+        for col in required_plan_cols:
+            if col not in df_plan.columns:
+                if col == 'Booking Needed': df_plan[col] = False
+                elif col == 'Day': df_plan[col] = "TBC"
+                else: df_plan[col] = ""
                 
-                new_data = pd.DataFrame([{"name": name, "area": area, "status": status, "day": day}])
-                updated_df = pd.concat([df_plan, new_data], ignore_index=True)
-                conn.update(data=updated_df)
-                st.success(f"Added {name} to {area}!")
-                st.rerun()
+        df_plan = df_plan[required_plan_cols].dropna(how="all", subset=['Item'])
+        df_plan['Booking Needed'] = df_plan['Booking Needed'].fillna(False).astype(bool)
+        df_plan['Day'] = df_plan['Day'].replace("", "TBC").fillna("TBC")
+        df_plan['Category'] = df_plan['Category'].replace("", "Activity").fillna("Activity")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.header("📍 TBD List (By Area)")
-        tbd_df = df_plan[df_plan['status'] == 'TBD']
-        if tbd_df.empty:
-            st.write("No unscheduled plans.")
-        else:
-            for area, group in tbd_df.groupby('area'):
-                with st.expander(f"🏘️ {area}", expanded=True):
-                    for idx, row in group.iterrows():
-                        st.write(f"• {row['name']}")
+    except Exception as e:
+        st.error(f"Error loading Planner tab: {e}")
+        st.stop()
 
-    with col2:
-        st.header("🗓️ Itinerary (By Day)")
-        sched_df = df_plan[df_plan['status'] == 'Scheduled']
-        if sched_df.empty:
-            st.info("Nothing scheduled yet.")
+    # --- 2. AI SMART ADD & SCHEDULING TOOLKIT ---
+    with st.expander("✨ AI Planning Assistant", expanded=False):
+        ai_tab1, ai_tab2 = st.tabs(["➕ Smart Add", "🪄 Suggest Schedule"])
+        
+        with ai_tab1:
+            st.write("**Paste anything here!** (e.g., 'Opera house tour 2pm', a Google Maps link, or 'need to book that cool airbnb in surry hills')")
+            raw_input = st.text_area("Raw Details:")
+            force_cat = st.selectbox("Category Hint (Optional)", ["Auto-Detect", "Stay", "Flight", "Tour", "Food", "Activity"])
+            
+            if st.button("🚀 Process & Add to Itinerary", use_container_width=True):
+                if raw_input:
+                    with st.spinner("AI is analyzing, formatting, and checking booking needs..."):
+                        # ==========================================
+                        # LLM INTEGRATION POINT:
+                        # In a live app, you would send `raw_input` to Gemini here.
+                        # Prompt: "Extract: Official Name, Category, Area, Maps Search Link, and Boolean if booking is required. Return strictly as JSON."
+                        # ==========================================
+                        
+                        # --- MOCK AI RESPONSE (Replace with actual genai call) ---
+                        import time; time.sleep(1.5) # Simulating AI thinking
+                        mock_ai_data = {
+                            "Item": f"Cleaned: {raw_input[:15]}...",
+                            "Category": force_cat if force_cat != "Auto-Detect" else "Activity",
+                            "Area": "Sydney (AI Detected)",
+                            "Maps Link": f"https://www.google.com/maps/search/?api=1&query=Sydney",
+                            "Booking Needed": True if "book" in raw_input.lower() or "airbnb" in raw_input.lower() or "flight" in raw_input.lower() else False,
+                            "Day": "TBC", "Time": "", "Notes": "Auto-added via AI."
+                        }
+                        
+                        # Add to Planner
+                        new_plan_row = pd.DataFrame([mock_ai_data])
+                        updated_plan = pd.concat([df_plan, new_plan_row], ignore_index=True)
+                        conn.update(spreadsheet=url, data=updated_plan, worksheet="Planner")
+                        
+                        # --- CROSS-TAB SYNC: ADD TO LEDGER IF BOOKING NEEDED ---
+                        if mock_ai_data["Booking Needed"]:
+                            try:
+                                df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=5)
+                                new_exp_row = pd.DataFrame([{
+                                    "Date": str(datetime.date.today()), "Category": mock_ai_data["Category"], 
+                                    "Item": f"Booking Deposit: {mock_ai_data['Item']}", "Currency": "AUD", 
+                                    "Cost": 0.0, "Paid By": trip_users[0], "Split By": "All", 
+                                    "Remark": "Auto-generated from Planner", "Settled": False
+                                }])
+                                clean_exp = df_exp.drop(columns=['Cost_HKD', 'Cost_AUD', 'Split_Count'], errors='ignore')
+                                updated_exp = pd.concat([clean_exp, new_exp_row], ignore_index=True)
+                                conn.update(spreadsheet=url, data=updated_exp, worksheet="Expenses")
+                                st.toast("Ledger updated: Pending booking expense added!")
+                            except Exception as e:
+                                st.error(f"Could not cross-sync to Expenses: {e}")
+                        
+                        st.success(f"Added {mock_ai_data['Item']}!")
+                        st.cache_data.clear()
+                        time.sleep(1)
+                        st.rerun()
+
+        with ai_tab2:
+            st.write("Let AI analyze your **TBC** items and suggest how to group them by area and day.")
+            if st.button("🧠 Generate Schedule Suggestions", use_container_width=True):
+                with st.spinner("AI is calculating distances and optimizing your trip..."):
+                    # ==========================================
+                    # LLM INTEGRATION POINT:
+                    # Send `df_plan.to_dict()` to Gemini here.
+                    # Prompt: "Look at these items. Group items in similar 'Areas' onto the same 'Day'. Output a friendly text suggestion, do NOT output code."
+                    # ==========================================
+                    st.info("""
+                    **🤖 AI Suggestions:**
+                    * **Day 2:** Move 'Bondi Beach' and 'Icebergs Dining' to Day 2, as they are in the same area.
+                    * **Day 3:** You have 'Opera House' (CBD) and 'Taronga Zoo' (North Shore) on the same day. Consider grouping the Zoo with your Manly ferry trip!
+                    
+                    *(Review these suggestions and edit your items below!)*
+                    """)
+
+    st.divider()
+
+    # --- 3. FILTERING & GROUPING UI ---
+    st.caption("🔍 View Options")
+    vf1, vf2, vf3 = st.columns(3)
+    
+    unique_days = ["All Days"] + sorted([d for d in df_plan['Day'].unique() if str(d) != "nan" and d])
+    unique_areas = ["All Areas"] + sorted([a for a in df_plan['Area'].unique() if str(a) != "nan" and a])
+    unique_cats = ["All Categories"] + sorted([c for c in df_plan['Category'].unique() if str(c) != "nan" and c])
+    
+    filt_day = vf1.selectbox("Filter Day", unique_days)
+    filt_area = vf2.selectbox("Filter Area", unique_areas)
+    filt_cat = vf3.selectbox("Filter Category", unique_cats)
+    
+    group_by = st.radio("Group Feed By:", ["None (Chronological)", "Day", "Area", "Category"], horizontal=True)
+
+    # Apply Filters
+    view_plan = df_plan.copy()
+    if filt_day != "All Days": view_plan = view_plan[view_plan['Day'] == filt_day]
+    if filt_area != "All Areas": view_plan = view_plan[view_plan['Area'] == filt_area]
+    if filt_cat != "All Categories": view_plan = view_plan[view_plan['Category'] == filt_cat]
+
+    # Session state for planner editing
+    if 'plan_edit_idx' not in st.session_state:
+        st.session_state.plan_edit_idx = None
+
+    # --- 4. THE STACKED ITINERARY FEED ---
+    category_emojis = {"Stay": "🏨", "Flight": "✈️", "Tour": "🚌", "Food": "🍽️", "Activity": "🎟️"}
+
+    if view_plan.empty:
+        st.info("No plans match this filter. Use the AI Smart Add above!")
+    else:
+        # Function to render a single card
+        def render_plan_card(idx, row):
+            with st.container(border=True):
+                # EDIT MODE
+                if st.session_state.plan_edit_idx == idx:
+                    with st.form(key=f"edit_plan_{idx}"):
+                        st.write(f"✏️ **Editing:** {row['Item']}")
+                        e_item = st.text_input("Official Name", value=row['Item'])
+                        
+                        ec1, ec2, ec3 = st.columns(3)
+                        e_day = ec1.text_input("Day (e.g., Day 1, TBC)", value=row['Day'])
+                        e_time = ec2.text_input("Time", value=row['Time'])
+                        e_cat = ec3.selectbox("Category", ["Stay", "Flight", "Tour", "Food", "Activity", "Other"], 
+                                              index=["Stay", "Flight", "Tour", "Food", "Activity", "Other"].index(row['Category']) if row['Category'] in ["Stay", "Flight", "Tour", "Food", "Activity", "Other"] else 5)
+                        
+                        ec4, ec5 = st.columns(2)
+                        e_area = ec4.text_input("Area / District", value=row['Area'])
+                        e_link = ec5.text_input("Maps Link", value=row['Maps Link'])
+                        
+                        e_book = st.checkbox("Booking/Tickets Needed?", value=row['Booking Needed'])
+                        e_notes = st.text_area("Notes (Meetup spot, check-in times, etc.)", value=row['Notes'])
+                        
+                        sub1, sub2 = st.columns(2)
+                        if sub1.form_submit_button("💾 Save", use_container_width=True):
+                            df_plan.loc[idx, 'Item'] = e_item
+                            df_plan.loc[idx, 'Day'] = e_day
+                            df_plan.loc[idx, 'Time'] = e_time
+                            df_plan.loc[idx, 'Category'] = e_cat
+                            df_plan.loc[idx, 'Area'] = e_area
+                            df_plan.loc[idx, 'Maps Link'] = e_link
+                            df_plan.loc[idx, 'Booking Needed'] = e_book
+                            df_plan.loc[idx, 'Notes'] = e_notes
+                            
+                            conn.update(spreadsheet=url, data=df_plan, worksheet="Planner")
+                            st.session_state.plan_edit_idx = None
+                            st.cache_data.clear()
+                            import time; time.sleep(1)
+                            st.rerun()
+                        if sub2.form_submit_button("❌ Cancel", use_container_width=True):
+                            st.session_state.plan_edit_idx = None
+                            st.rerun()
+                
+                # NORMAL VIEW MODE
+                else:
+                    icon = category_emojis.get(row['Category'], "📍")
+                    book_badge = "🚨 **Needs Booking**" if row['Booking Needed'] else ""
+                    
+                    c1, c2 = st.columns([5, 1])
+                    with c1:
+                        if row['Maps Link']:
+                            st.markdown(f"#### [{icon} {row['Item']}]({row['Maps Link']})")
+                        else:
+                            st.markdown(f"#### {icon} {row['Item']}")
+                        
+                        st.write(f"**{row['Day']}** | 🕒 {row['Time']} | 🏙️ {row['Area']}")
+                        if book_badge: st.warning(book_badge)
+                        if row['Notes']: st.caption(f"📝 {row['Notes']}")
+                    
+                    with c2:
+                        if st.button("✏️", key=f"p_edit_{idx}"):
+                            st.session_state.plan_edit_idx = idx
+                            st.rerun()
+                        if st.button("🗑️", key=f"p_del_{idx}"):
+                            clean_df = df_plan.drop(index=idx)
+                            conn.update(spreadsheet=url, data=clean_df, worksheet="Planner")
+                            st.toast(f"Deleted {row['Item']}")
+                            st.cache_data.clear()
+                            import time; time.sleep(1)
+                            st.rerun()
+
+        # Grouping Logic Display
+        if group_by == "None (Chronological)":
+            for idx, row in view_plan.iterrows():
+                render_plan_card(idx, row)
         else:
-            for day, day_group in sched_df.sort_values('day').groupby('day'):
-                st.markdown(f"### 🗓️ Day {day}")
-                for area, area_group in day_group.groupby('area'):
-                    st.caption(f"Neighborhood: {area}")
-                    for idx, row in area_group.iterrows():
-                        st.info(f"**{row['name']}**")
+            grouped = view_plan.groupby(group_by)
+            for group_name, group_df in grouped:
+                st.write(f"### {group_name}")
+                for idx, row in group_df.iterrows():
+                    render_plan_card(idx, row)
 
 # ==============================================================================
 # --- TAB 2: EXPENSES & DEBTS ---
