@@ -61,7 +61,7 @@ tab1, tab2 = st.tabs(["🗓️ Planner & Map", "💰 Expenses"])
 # --- TAB 1: PLANNER & MAP ---
 # ==============================================================================
 with tab1:
-    df_plan = conn.read(ttl=0)
+    df_plan = conn.read(ttl=60)
 
     for col in ['name', 'area', 'status', 'day']:
         if col not in df_plan.columns:
@@ -131,7 +131,7 @@ with tab2:
         target_currency = st.radio("Display App In:", ["HKD", "AUD"], horizontal=True)
 
     try:
-        df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=0)
+        df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=60)
         required_exp_cols = ['Date', 'Category', 'Item', 'Currency', 'Cost', 'Paid By', 'Split By', 'Remark', 'Settled']
 
         for col in required_exp_cols:
