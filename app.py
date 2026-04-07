@@ -145,12 +145,9 @@ with tab2:
         df_exp = df_exp[required_exp_cols]
         df_exp = df_exp.dropna(how="all", subset=['Item'])
 
-# --- NEW DATE FIX ---
-        # Parse dates, handling mixed formats from Google Sheets
+        # --- DATE FIX ---
         df_exp['Date'] = pd.to_datetime(df_exp['Date'], format='mixed', errors='coerce')
-        # If any date is missing or was 'None', replace it with today's date instead of dropping it
         df_exp['Date'] = df_exp['Date'].fillna(pd.to_datetime('today'))
-        # Convert cleanly to YYYY-MM-DD format
         df_exp['Date'] = df_exp['Date'].dt.date
         
         df_exp['Settled'] = df_exp['Settled'].fillna(False).astype(bool)
@@ -209,34 +206,12 @@ with tab2:
                 with share_cols[i]:
                     st.info(f"**{user}**\n\n${user_shares[user]:,.2f} {target_currency}")
 
-            chart_col1, chart_col2 = st.columns(2)
-            with chart_col1:
-                st.write("**Total Trip Breakdown**")
-                df_total_pie = pd.DataFrame(list(total_cat_shares.items()), columns=['Category', 'Amount'])
-                df_total_pie = df_total_pie[df_total_pie['Amount'] > 0] 
-                if not df_total_pie.empty:
-                    fig_total = px.pie(df_total_pie, values='Amount', names='Category', hole=0.4)
-                    fig_total.update_traces(textposition='inside', textinfo='percent+label')
-                    fig_total.update_layout(showlegend=False, margin=dict(t=10, b=10, l=10, r=10), height=300)
-                    st.plotly_chart(fig_total, use_container_width=True)
-
-            with chart_col2:
-                st.write("**Personal Breakdown**")
-                selected_user = st.selectbox("View chart for:", trip_users, label_visibility="collapsed")
-                df_user_pie = pd.DataFrame(list(user_cat_shares[selected_user].items()), columns=['Category', 'Amount'])
-                df_user_pie = df_user_pie[df_user_pie['Amount'] > 0]
-                if not df_user_pie.empty:
-                    fig_user = px.pie(df_user_pie, values='Amount', names='Category', hole=0.4)
-                    fig_user.update_traces(textposition='inside', textinfo='percent+label')
-                    fig_user.update_layout(showlegend=False, margin=dict(t=10, b=10, l=10, r=10), height=300)
-                    st.plotly_chart(fig_user, use_container_width=True)
-
         st.divider()
 
         # --- 2B: THE NEW STACKED LEDGER & ENTRY FORM ---
         st.write("### 📝 Ledger Feed")
         
-        # 1. NEW ENTRY FORM (Stacked on top)
+        # 1. NEW ENTRY FORM
         with st.expander("➕ Add New Expense", expanded=False):
             with st.form("new_entry_form"):
                 f_date = st.date_input("Date", value=datetime.date.today())
@@ -254,80 +229,117 @@ with tab2:
                 if st.form_submit_button("💾 Save to Ledger", use_container_width=True):
                     if f_item and f_cost > 0:
                         new_row = pd.DataFrame([{
-                            "Date": f_date.strftime("%Y-%m-%d"), # <-- Force clean string format
+                            "Date": f_date.strftime("%Y-%m-%d"), 
                             "Category": f_cat, "Item": f_item, 
                             "Currency": f_curr, "Cost": f_cost, "Paid By": f_payer, 
                             "Split By": f_split, "Remark": "", "Settled": False
                         }])
                         clean_df = df_exp.drop(columns=['Cost_HKD', 'Cost_AUD', 'Split_Count'], errors='ignore')
                         updated_exp = pd.concat([clean_df, new_row], ignore_index=True)
-                        
-                        # Send update to Google Sheets
                         conn.update(spreadsheet=url, data=updated_exp, worksheet="Expenses")
-                        
-                        st.success("✅ Added successfully! Syncing with Google Sheets...")
-                        
-                        # Clear the cache
+                        st.success("✅ Added successfully!")
                         st.cache_data.clear()
-                        
-                        # Give Google Sheets 2 seconds to process the update
                         time.sleep(2)
-                        
-                        # Reload the page
                         st.rerun()
                     else:
                         st.error("Please enter an item name and a cost greater than 0.")
 
-        # 2. QUERY FILTERS
-        st.caption("Filter records:")
+        # 2. QUERY FILTERS & SORTING
+        st.caption("🔍 Sort & Filter")
+        
         filt_c1, filt_c2 = st.columns(2)
-        
-        # Get unique dates safely
-        unique_dates = sorted(df_exp['Date'].dropna().unique().tolist(), reverse=True)
-        
         filter_user = filt_c1.selectbox("Paid By", ["Everyone"] + trip_users)
-        filter_date = filt_c2.selectbox("Date", ["All Dates"] + unique_dates)
+        filter_cat = filt_c2.selectbox("Category", ["All Categories"] + expense_categories)
+        
+        sort_c1, sort_c2 = st.columns(2)
+        sort_by = sort_c1.selectbox("Sort By", ["Latest Date", "Oldest Date", "Highest Cost", "Lowest Cost"])
+        show_settled = sort_c2.toggle("👀 Show Settled Expenses", value=False)
 
         # Apply Filters
         view_df = df_exp.copy()
-        if filter_user != "Everyone":
-            view_df = view_df[view_df['Paid By'] == filter_user]
-        if filter_date != "All Dates":
-            view_df = view_df[view_df['Date'] == filter_date]
+        if not show_settled: view_df = view_df[view_df['Settled'] == False]
+        if filter_user != "Everyone": view_df = view_df[view_df['Paid By'] == filter_user]
+        if filter_cat != "All Categories": view_df = view_df[view_df['Category'] == filter_cat]
+
+        # Apply Sorting
+        if sort_by == "Latest Date": view_df = view_df.sort_values('Date', ascending=False)
+        elif sort_by == "Oldest Date": view_df = view_df.sort_values('Date', ascending=True)
+        elif sort_by == "Highest Cost": view_df = view_df.sort_values('Cost', ascending=False)
+        elif sort_by == "Lowest Cost": view_df = view_df.sort_values('Cost', ascending=True)
+
+        # Session state for editing
+        if 'edit_idx' not in st.session_state:
+            st.session_state.edit_idx = None
 
         # 3. STACKED FEED VIEW
         if view_df.empty:
             st.info("No expenses found matching these filters.")
         else:
-            for idx, row in view_df.sort_values('Date', ascending=False).iterrows():
+            for idx, row in view_df.iterrows():
                 with st.container(border=True):
-                    # Format the cost display
-                    if row['Currency'] == 'AUD':
-                        hkd_equiv = row['Cost'] * aud_to_hkd
-                        cost_display = f"${row['Cost']:,.2f} AUD (≈ ${hkd_equiv:,.2f} HKD)"
-                    else:
-                        cost_display = f"${row['Cost']:,.2f} HKD"
+                    
+                    # --- EDIT MODE ---
+                    if st.session_state.edit_idx == idx:
+                        st.write(f"✏️ **Editing:** {row['Item']}")
+                        with st.form(key=f"edit_form_{idx}"):
+                            e_item = st.text_input("Item", value=row['Item'])
+                            e_cost = st.number_input("Cost", value=float(row['Cost']), min_value=0.0)
+                            
+                            c1, c2 = st.columns(2)
+                            e_payer = c1.selectbox("Paid By", trip_users, index=trip_users.index(row['Paid By']) if row['Paid By'] in trip_users else 0)
+                            e_curr = c2.selectbox("Currency", ["AUD", "HKD"], index=0 if row['Currency'] == "AUD" else 1)
+                            
+                            col_sub1, col_sub2 = st.columns(2)
+                            if col_sub1.form_submit_button("💾 Save Changes", use_container_width=True):
+                                df_exp.at[idx, 'Item'] = e_item
+                                df_exp.at[idx, 'Cost'] = e_cost
+                                df_exp.at[idx, 'Paid By'] = e_payer
+                                df_exp.at[idx, 'Currency'] = e_curr
+                                
+                                clean_save_df = df_exp.drop(columns=['Cost_HKD', 'Cost_AUD', 'Split_Count'], errors='ignore')
+                                conn.update(spreadsheet=url, data=clean_save_df, worksheet="Expenses")
+                                st.session_state.edit_idx = None
+                                st.cache_data.clear()
+                                time.sleep(2)
+                                st.rerun()
+                                
+                            if col_sub2.form_submit_button("❌ Cancel", use_container_width=True):
+                                st.session_state.edit_idx = None
+                                st.rerun()
 
-                    status_icon = "✅ Settled" if row['Settled'] else "⏳ Pending"
-                    
-                    st.markdown(f"**{row['Item']}** | {status_icon}")
-                    st.write(f"{row['Category']} • {row['Date']} • **{cost_display}**")
-                    
-                    c1, c2, c3 = st.columns([2, 2, 1])
-                    c1.caption(f"🤑 Paid by: **{row['Paid By']}**")
-                    c2.caption(f"🍕 Split: **{row['Split By']}**")
-                    
-                    # Delete Button for easy management
-                    if c3.button("🗑️", key=f"del_{idx}", help="Delete this expense"):
-                        clean_df = df_exp.drop(index=idx).drop(columns=['Cost_HKD', 'Cost_AUD', 'Split_Count'], errors='ignore')
-                        conn.update(spreadsheet=url, data=clean_df, worksheet="Expenses")
-                        st.toast(f"Deleted {row['Item']}")
-                        st.cache_data.clear()
-                        st.rerun()
+                    # --- NORMAL VIEW MODE ---
+                    else:
+                        if row['Currency'] == 'AUD':
+                            hkd_equiv = row['Cost'] * aud_to_hkd
+                            cost_display = f"${row['Cost']:,.2f} AUD (≈ ${hkd_equiv:,.2f} HKD)"
+                        else:
+                            cost_display = f"${row['Cost']:,.2f} HKD"
+
+                        status_icon = "✅ Settled" if row['Settled'] else "⏳ Pending"
+                        
+                        st.markdown(f"**{row['Item']}** | {status_icon}")
+                        st.write(f"{row['Category']} • {row['Date']} • **{cost_display}**")
+                        
+                        c1, c2, c3 = st.columns([3, 3, 1])
+                        c1.caption(f"🤑 Paid by: **{row['Paid By']}**")
+                        c2.caption(f"🍕 Split: **{row['Split By']}**")
+                        
+                        # Action Buttons Stacked
+                        with c3:
+                            if st.button("✏️", key=f"edit_btn_{idx}", help="Edit record"):
+                                st.session_state.edit_idx = idx
+                                st.rerun()
+                            if st.button("🗑️", key=f"del_btn_{idx}", help="Delete record"):
+                                clean_df = df_exp.drop(index=idx).drop(columns=['Cost_HKD', 'Cost_AUD', 'Split_Count'], errors='ignore')
+                                conn.update(spreadsheet=url, data=clean_df, worksheet="Expenses")
+                                st.toast(f"Deleted {row['Item']}")
+                                st.cache_data.clear()
+                                time.sleep(2)
+                                st.rerun()
 
         # --- 2C: SMART SETTLEMENT ENGINE ---
         st.divider()
-        st.subheader("⚖️ Unified Net Balances")
+        st.subheader("⚖️ Unified Net Balances & Settlements")
 
         active_debts = df_exp[df_exp['Settled'] == False].copy()
 
@@ -348,6 +360,7 @@ with tab2:
                     for person in involved:
                         balances_aud[person] -= split_amount
 
+            # Display Individual Net Balances
             cols = st.columns(len(trip_users))
             for i, user in enumerate(trip_users):
                 with cols[i]:
@@ -359,23 +372,46 @@ with tab2:
                         st.success(f"+ ${net_aud:.2f} AUD\n\n(+ ${net_hkd:.2f} HKD)")
                     elif net_aud < -0.01:
                         st.error(f"- ${abs(net_aud):.2f} AUD\n\n(- ${abs(net_hkd):.2f} HKD)")
-                        
-                        if st.button(f"💸 Settle {user}'s Debt", key=f"settle_{user}"):
-                            with st.spinner(f"Marking {user}'s debts as settled..."):
-                                
-                                def involves_user(r):
-                                    if r['Paid By'] == user: return True
-                                    s = str(r['Split By'])
-                                    return True if s == 'All' else (user in s)
+                    else:
+                        st.info("Settled Up!")
 
-                                mask = df_exp['Settled'] == False
-                                affected = df_exp[mask].apply(involves_user, axis=1)
-                                
-                                df_exp.loc[mask & affected, 'Settled'] = True
-                                clean_save_df = df_exp.drop(columns=['Cost_HKD', 'Cost_AUD', 'Split_Count'], errors='ignore')
-                                conn.update(spreadsheet=url, data=clean_save_df, worksheet="Expenses")
-                                st.cache_data.clear()
-                                st.rerun()
+            # --- CALCULATE WHO PAYS WHOM ---
+            st.write("#### 🎯 Smart Transfer Guide")
+            st.caption("Here is exactly who needs to pay whom to settle all debts:")
+            
+            creditors = {user: amt for user, amt in balances_aud.items() if amt > 0.01}
+            debtors = {user: -amt for user, amt in balances_aud.items() if amt < -0.01}
+            
+            transfers = []
+            for debtor, debt_amt in debtors.items():
+                for creditor, credit_amt in list(creditors.items()):
+                    if debt_amt <= 0.01: break
+                    if credit_amt <= 0.01: continue
+                    
+                    settle_amount = min(debt_amt, credit_amt)
+                    transfers.append((debtor, creditor, settle_amount))
+                    
+                    # Update amounts
+                    debt_amt -= settle_amount
+                    creditors[creditor] -= settle_amount
+            
+            if transfers:
+                for sender, receiver, amt in transfers:
+                    amt_hkd = amt * aud_to_hkd
+                    st.warning(f"💸 **{sender}** needs to pay **{receiver}**: ${amt:.2f} AUD *(≈ ${amt_hkd:.2f} HKD)*")
+            else:
+                st.success("Everyone is totally settled up!")
+
+            # Quick Settle All Button
+            if st.button("✅ Mark ALL Active Debts as Settled", use_container_width=True):
+                with st.spinner("Updating records..."):
+                    df_exp['Settled'] = True
+                    clean_save_df = df_exp.drop(columns=['Cost_HKD', 'Cost_AUD', 'Split_Count'], errors='ignore')
+                    conn.update(spreadsheet=url, data=clean_save_df, worksheet="Expenses")
+                    st.success("All debts settled!")
+                    st.cache_data.clear()
+                    time.sleep(2)
+                    st.rerun()
 
     except Exception as e:
         st.error(f"Robot can't read the 'Expenses' tab. Error: {e}")
