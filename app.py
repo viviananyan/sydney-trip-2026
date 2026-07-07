@@ -115,7 +115,10 @@ if s_sort == "Date (Newest First)":
     view_df = view_df.sort_values(by="Date", ascending=False)
 elif s_sort == "Date (Oldest First)":
     view_df = view_df.sort_values(by="Date", ascending=True)
-elif s
+elif s_sort == "Cost (Highest First)":
+    view_df = view_df.sort_values(by="Cost_HKD", ascending=False)
+elif s_sort == "Cost (Lowest First)":
+    view_df = view_df.sort_values(by="Cost_HKD", ascending=True)
 # --- 4. SECTION: ADD NEW EXPENSE ---
 with st.expander("➕ Log New Expense", expanded=False):
     # Isolated form key to bypass Streamlit's background cache locks
