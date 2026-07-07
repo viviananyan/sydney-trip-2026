@@ -18,7 +18,6 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 trip_users = ["Suri🐶", "Bobo🍔", "Sally🦕"] 
 
-# 🔴 Base categories with emojis
 base_categories = [
     "🍔 Food", "🚌 Transport", "🛍️ Shopping", 
     "🎟️ Entertainment", "🏨 Stay", "✈️ Flights", "📦 Other"
@@ -27,7 +26,7 @@ base_categories = [
 def safe_index(lst, item):
     return lst.index(item) if item in lst else 0
 
-# --- 3. DATA LOADING & DYNAMIC CATEGORIES ---
+# --- 3. DATA LOADING & SANITIZATION ---
 try:
     df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=5)
     
@@ -43,7 +42,10 @@ try:
     df_exp["Remark"] = df_exp["Remark"].fillna("").astype(str)
     df_exp["Remark"] = df_exp["Remark"].replace({"nan": "", "None": "", "NaN": ""})
 
-    # 🔴 Dynamically load any custom categories previously saved to the sheet
+    # 🔴 THE FIX: Standardize all messy Google Sheets dates into strict YYYY-MM-DD formats
+    # This ensures alphabetical string sorting perfectly matches chronological sorting!
+    df_exp["Date"] = pd.to_datetime(df_exp["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
+
     existing_custom_cats = [c for c in df_exp["Category"].dropna().unique() if c and c not in base_categories]
     all_categories_list = base_categories + existing_custom_cats
     dropdown_options = all_categories_list + ["➕ Add Custom..."]
@@ -54,10 +56,9 @@ except Exception as e:
 
 # --- 4. SECTION: ADD NEW EXPENSE ---
 with st.expander("➕ Log New Expense", expanded=False):
-    with st.form("australia_tracker_form_v8", clear_on_submit=True):
+    with st.form("australia_tracker_form_v9", clear_on_submit=True):
         f_date = st.date_input("Date", datetime.date.today())
         
-        # 🔴 Dynamic Category Selector
         f_cat_selection = st.selectbox("Category", dropdown_options)
         if f_cat_selection == "➕ Add Custom...":
             f_cat = st.text_input("Type Custom Category", placeholder="e.g., 🏄‍♂️ Surfing")
@@ -118,7 +119,6 @@ with st.expander("🔍 Search & Filter Tools", expanded=False):
     f1, f2 = st.columns(2)
     s_payer = f1.multiselect("Filter by Payer", options=trip_users, default=[])
     
-    # Filter using all known categories
     s_cat = f2.multiselect("Filter by Category", options=all_categories_list, default=[])
     s_sort = st.selectbox("Sort Order", ["Date (Newest First)", "Date (Oldest First)", "Cost (Highest First)", "Cost (Lowest First)"])
 
@@ -150,7 +150,6 @@ else:
                         
                     e_date_input = st.date_input("Date", e_date)
                     
-                    # 🔴 Dynamic Category for Edit Mode
                     e_cat_selection = st.selectbox("Category", dropdown_options, index=safe_index(dropdown_options, row['Category']))
                     if e_cat_selection == "➕ Add Custom...":
                         e_cat = st.text_input("Type Custom Category", placeholder="e.g., 🏄‍♂️ Surfing")
