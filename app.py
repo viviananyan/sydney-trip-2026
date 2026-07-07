@@ -9,7 +9,6 @@ import plotly.express as px
 st.set_page_config(page_title="Australia 2026 Expense Tracker", page_icon="💰", layout="centered")
 st.title("💰 Australia 2026 Expense Tracker")
 
-# Initialize session state for editing rows
 if "editing_row" not in st.session_state:
     st.session_state.editing_row = None
 
@@ -20,7 +19,6 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 trip_users = ["Suri🐶", "Bobo🍔", "Sally🦕"] 
 categories = ["Food", "Transport", "Shopping", "Entertainment", "Stay", "Flights", "Other"]
 
-# Safe index helper for dropdowns during editing
 def safe_index(lst, item):
     return lst.index(item) if item in lst else 0
 
@@ -36,6 +34,10 @@ try:
     df_exp = df_exp[required_cols].dropna(how="all", subset=["Item"])
     df_exp["Settled"] = df_exp["Settled"].fillna(False).astype(bool)
     df_exp["Cost"] = pd.to_numeric(df_exp["Cost"], errors="coerce").fillna(0.0)
+    
+    # Clean up empty remarks to prevent "nan" from showing up
+    df_exp["Remark"] = df_exp["Remark"].fillna("").astype(str)
+    df_exp["Remark"] = df_exp["Remark"].replace({"nan": "", "None": "", "NaN": ""})
 
 except Exception as e:
     st.error(f"Error loading Expenses tab: {e}")
@@ -43,7 +45,7 @@ except Exception as e:
 
 # --- 4. SECTION: ADD NEW EXPENSE ---
 with st.expander("➕ Log New Expense", expanded=False):
-    with st.form("australia_tracker_form_v6", clear_on_submit=True):
+    with st.form("australia_tracker_form_v7", clear_on_submit=True):
         f_date = st.date_input("Date", datetime.date.today())
         f_cat = st.selectbox("Category", categories)
         f_item = st.text_input("Item / Description", placeholder="e.g., Dinner at Sydney Tower")
@@ -175,16 +177,16 @@ else:
                         st.caption(f"*(Original: {row['Currency']} {row['Cost']:.2f})*")
                         
                     st.write(f"💳 Paid by **{row['Paid By']}** | Split: **{row['Split By']}**")
-                    if row['Remark']:
-                        st.caption(f"📝 {row['Remark']}")
+                    
+                    # 🔴 Show "nothing yet..." if remark is blank
+                    display_remark = row['Remark'] if str(row['Remark']).strip() else "nothing yet..."
+                    st.caption(f"📝 {display_remark}")
                 
                 with col2:
-                    # Added Edit Button
                     if st.button("✏️ Edit", key=f"edit_btn_{idx}", use_container_width=True):
                         st.session_state.editing_row = idx
                         st.rerun()
                         
-                    # Delete Button
                     if st.button("🗑️ Delete", key=f"del_{idx}", type="secondary", use_container_width=True):
                         cleaned_df = df_exp.drop(index=idx)
                         conn.update(spreadsheet=url, data=cleaned_df, worksheet="Expenses")
@@ -204,34 +206,67 @@ if active_calc_df.empty:
 else:
     total_trip = active_calc_df["Converted_Cost"].sum()
     
-    # Pre-calculate each person's exact true share (how much they actually consumed/owe)
-    user_shares = {user: 0.0 for user in trip_users}
+    # Pre-calculate each person's exact true share (broken down by category for the pie chart)
+    pie_data = []
     for _, row in active_calc_df.iterrows():
         amt = row["Converted_Cost"]
+        cat = row["Category"]
         splitter = str(row["Split By"]).strip()
+        
         if splitter == "All":
+            share = amt / len(trip_users)
             for u in trip_users:
-                user_shares[u] += amt / len(trip_users)
+                pie_data.append({"User": u, "Category": cat, "Amount": share})
         else:
-            involved = [u.strip() for u in splitter.split(",") if u.strip() in user_shares]
+            involved = [u.strip() for u in splitter.split(",") if u.strip() in trip_users]
             if involved:
+                share = amt / len(involved)
                 for u in involved:
-                    user_shares[u] += amt / len(involved)
+                    pie_data.append({"User": u, "Category": cat, "Amount": share})
             else:
-                user_shares[str(row["Paid By"]).strip()] += amt # Fallback
+                payer = str(row["Paid By"]).strip()
+                pie_data.append({"User": payer, "Category": cat, "Amount": amt})
 
+    shares_df = pd.DataFrame(pie_data)
+    
     m1, m2 = st.columns(2)
     m1.metric(f"Unsettled Total ({display_currency})", f"${total_trip:,.2f}")
     
-    # 🔴 Replaced generic split with personalized view
-    selected_view_user = m2.selectbox("👀 View Personal Total Expense:", trip_users)
-    m2.metric(f"{selected_view_user}'s True Share", f"${user_shares[selected_view_user]:,.2f}")
+    # 🔴 "Everyone" added to the dropdown options
+    view_options = ["Everyone"] + trip_users
+    selected_view_user = m2.selectbox("👀 View Personal Total Expense:", view_options)
     
-    st.write(f"#### 🍩 Spending by Category ({display_currency})")
-    cat_chart_data = active_calc_df.groupby("Category")["Converted_Cost"].sum().reset_index()
-    fig = px.pie(cat_chart_data, values="Converted_Cost", names="Category", hole=0.4)
-    fig.update_layout(margin=dict(t=0, b=0, l=0, r=0))
-    st.plotly_chart(fig, use_container_width=True)
+    # Filter the data and chart based on the selected user
+    if selected_view_user == "Everyone":
+        display_total = total_trip
+        cat_chart_data = active_calc_df.groupby("Category")["Converted_Cost"].sum().reset_index()
+        cat_chart_data.rename(columns={"Converted_Cost": "Amount"}, inplace=True)
+    else:
+        if not shares_df.empty:
+            user_df = shares_df[shares_df["User"] == selected_view_user]
+            display_total = user_df["Amount"].sum()
+            cat_chart_data = user_df.groupby("Category")["Amount"].sum().reset_index()
+        else:
+            display_total = 0.0
+            cat_chart_data = pd.DataFrame(columns=["Category", "Amount"])
+            
+    m2.metric(f"Total Share ({display_currency})", f"${display_total:,.2f}")
+    
+    st.write(f"#### 🍩 Spending Breakdown ({selected_view_user})")
+    
+    if not cat_chart_data.empty and display_total > 0:
+        # 🔴 Added a much more colorful and vibrant color palette
+        fig = px.pie(
+            cat_chart_data, 
+            values="Amount", 
+            names="Category", 
+            hole=0.4,
+            color_discrete_sequence=px.colors.qualitative.Prism 
+        )
+        fig.update_layout(margin=dict(t=0, b=0, l=0, r=0))
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info(f"No active expenses for {selected_view_user} yet.")
     
     st.write("#### Who pays who?💸")
     balances = {user: 0.0 for user in trip_users}
@@ -275,7 +310,6 @@ else:
             st.write(trans)
             
         st.divider()
-        # 🔴 New Master Settlement Button!
         if st.button("✅ Settle All Pending Expenses", use_container_width=True, type="primary"):
             df_exp.loc[df_exp["Settled"] == False, "Settled"] = True
             conn.update(spreadsheet=url, data=df_exp, worksheet="Expenses")
