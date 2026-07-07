@@ -10,7 +10,7 @@ st.title("💰 Aus 2026 Expense Tracker")
 
 # --- 2. GOOGLE SHEETS CONNECTION ---
 # 🔴 REPLACE THIS WITH YOUR REAL GOOGLE SHEET URL:
-url = "https://docs.google.com/spreadsheets/d/your_actual_sheet_id_letters_and_numbers/edit"
+url = "https://docs.google.com/spreadsheets/d/17vTlewfPPS2lZainhCJgEEOkp5tJ3LDNqX8myrfJ7uQ/edit?gid=743694833#gid=743694833"
 
 # Initialize the connection (This defines 'conn' so Python knows what it is!)
 conn = st.connection("gsheets", type=GSheetsConnection)
