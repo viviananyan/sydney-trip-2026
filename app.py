@@ -34,8 +34,7 @@ except Exception as e:
 
 # --- 4. SECTION: ADD NEW EXPENSE ---
 with st.expander("➕ Log New Expense", expanded=False):
-    # Brand new key to guarantee no duplicates exist!
-    with st.form("absolute_final_form_2026", clear_on_submit=True):
+    with st.form("australia_tracker_form_v5", clear_on_submit=True):
         f_date = st.date_input("Date", datetime.date.today())
         f_cat = st.selectbox("Category", ["Food", "Transport", "Shopping", "Entertainment", "Stay", "Flights", "Other"])
         f_item = st.text_input("Item / Description", placeholder="e.g., Dinner at Sydney Tower")
@@ -66,10 +65,12 @@ with st.expander("➕ Log New Expense", expanded=False):
 
 st.divider()
 
-# --- 5. GLOBAL EXCHANGE RATE CONFIGURATION ---
-st.sidebar.header("💱 Exchange Settings")
+# --- 5. GLOBAL CURRENCY & EXCHANGE CONFIGURATION ---
+st.sidebar.header("💱 Currency Settings")
+display_currency = st.sidebar.radio("View & Settle Expenses In:", ["HKD", "AUD"], horizontal=True)
+
 ex_rate = st.sidebar.number_input(
-    "Set Conversion Rate (1 AUD to HKD)", 
+    "Set Conversion Rate (1 AUD = ? HKD)", 
     min_value=1.0, 
     value=5.42, 
     step=0.01, 
@@ -77,10 +78,14 @@ ex_rate = st.sidebar.number_input(
     help="Used to normalize all calculation values."
 )
 
-def convert_to_hkd(row):
-    return row["Cost"] * ex_rate if row["Currency"] == "AUD" else row["Cost"]
+# Dynamic conversion function based on the toggle!
+def convert_cost(row):
+    if display_currency == "HKD":
+        return row["Cost"] * ex_rate if row["Currency"] == "AUD" else row["Cost"]
+    else: # AUD mode
+        return row["Cost"] / ex_rate if row["Currency"] == "HKD" else row["Cost"]
 
-df_exp["Cost_HKD"] = df_exp.apply(convert_to_hkd, axis=1)
+df_exp["Converted_Cost"] = df_exp.apply(convert_cost, axis=1)
 
 # --- 6. SECTION: SEARCH, FILTER & SORT LEDGER ---
 st.subheader("📊 Active Ledger")
@@ -112,9 +117,9 @@ if s_sort == "Date (Newest First)":
 elif s_sort == "Date (Oldest First)":
     view_df = view_df.sort_values(by="Date", ascending=True)
 elif s_sort == "Cost (Highest First)":
-    view_df = view_df.sort_values(by="Cost_HKD", ascending=False)
+    view_df = view_df.sort_values(by="Converted_Cost", ascending=False)
 elif s_sort == "Cost (Lowest First)":
-    view_df = view_df.sort_values(by="Cost_HKD", ascending=True)
+    view_df = view_df.sort_values(by="Converted_Cost", ascending=True)
 
 if view_df.empty:
     st.info("No expenses found matching these criteria.")
@@ -125,7 +130,12 @@ else:
             with col1:
                 st.markdown(f"#### {row['Item']}")
                 st.caption(f"📅 {row['Date']} | 📂 {row['Category']}")
-                st.write(f"💰 **{row['Currency']} {row['Cost']:.2f}** *(approx. HKD {row['Cost_HKD']:.2f})*")
+                
+                # Shows the toggle currency clearly, and keeps the original underneath if it's different
+                st.write(f"💰 **{display_currency} {row['Converted_Cost']:.2f}**")
+                if row['Currency'] != display_currency:
+                    st.caption(f"*(Original receipt: {row['Currency']} {row['Cost']:.2f})*")
+                    
                 st.write(f"💳 Paid by **{row['Paid By']}** | Split: **{row['Split By']}**")
                 if row['Remark']:
                     st.caption(f"📝 {row['Remark']}")
@@ -149,29 +159,30 @@ else:
 st.divider()
 
 # --- 7. SECTION: ANALYTICS, CHARTS & SETTLEMENTS ---
-st.subheader("📈 Trip Summary & Settlement Matrix")
+st.subheader("📈 Trip Summary & Analytics")
 
 active_calc_df = df_exp[df_exp["Settled"] == False].copy()
 
 if active_calc_df.empty:
     st.success("🎉 All logged items are completely settled!")
 else:
-    total_trip_hkd = active_calc_df["Cost_HKD"].sum()
+    total_trip = active_calc_df["Converted_Cost"].sum()
     
     m1, m2 = st.columns(2)
-    m1.metric("Unsettled Total (Base HKD)", f"${total_trip_hkd:,.2f}")
-    m2.metric("Per Person Share (Equally Split)", f"${(total_trip_hkd / len(trip_users)):,.2f}")
+    m1.metric(f"Unsettled Total ({display_currency})", f"${total_trip:,.2f}")
+    m2.metric(f"Per Person Share", f"${(total_trip / len(trip_users)):,.2f}")
     
-    st.write("#### 🍩 Spending by Category (HKD)")
-    cat_chart_data = active_calc_df.groupby("Category")["Cost_HKD"].sum().reset_index()
-    st.bar_chart(data=cat_chart_data, x="Category", y="Cost_HKD", color="Category", use_container_width=True)
+    st.write(f"#### 🍩 Spending by Category ({display_currency})")
+    cat_chart_data = active_calc_df.groupby("Category")["Converted_Cost"].sum().reset_index()
+    st.bar_chart(data=cat_chart_data, x="Category", y="Converted_Cost", color="Category", use_container_width=True)
     
-    st.write("#### 🤝 Who Pays Who Matrix")
+    # 🔴 Renamed requested section
+    st.write("#### Who pays who?💸")
     
     balances = {user: 0.0 for user in trip_users}
     
     for _, row in active_calc_df.iterrows():
-        amt = row["Cost_HKD"]
+        amt = row["Converted_Cost"]
         payer = str(row["Paid By"]).strip()
         splitter = str(row["Split By"]).strip()
         
@@ -202,7 +213,8 @@ else:
         creditor_name, creditor_bal = creditors[0]
         
         amount_to_pay = min(abs(debtor_bal), creditor_bal)
-        transactions.append(f"👉 **{debtor_name}** pays **{creditor_name}**: **HKD {amount_to_pay:.2f}**")
+        # 🔴 Now prints in the selected toggle currency
+        transactions.append(f"👉 **{debtor_name}** pays **{creditor_name}**: **{display_currency} {amount_to_pay:.2f}**")
         
         debtors[0][1] += amount_to_pay
         creditors[0][1] -= amount_to_pay
