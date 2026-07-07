@@ -17,7 +17,7 @@ url = "https://docs.google.com/spreadsheets/d/17vTlewfPPS2lZainhCJgEEOkp5tJ3LDNq
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 trip_users = ["Suri🐶", "Bobo🍔", "Sally🦕"] 
-categories = ["Food", "Transport", "Shopping", "Entertainment", "Stay", "Flights", "Other"]
+default_categories = ["Food", "Transport", "Shopping", "Entertainment", "Stay", "Flights", "Other"]
 
 def safe_index(lst, item):
     return lst.index(item) if item in lst else 0
@@ -35,7 +35,6 @@ try:
     df_exp["Settled"] = df_exp["Settled"].fillna(False).astype(bool)
     df_exp["Cost"] = pd.to_numeric(df_exp["Cost"], errors="coerce").fillna(0.0)
     
-    # Clean up empty remarks to prevent "nan" from showing up
     df_exp["Remark"] = df_exp["Remark"].fillna("").astype(str)
     df_exp["Remark"] = df_exp["Remark"].replace({"nan": "", "None": "", "NaN": ""})
 
@@ -43,11 +42,21 @@ except Exception as e:
     st.error(f"Error loading Expenses tab: {e}")
     st.stop()
 
+# 🧠 DYNAMIC CATEGORY LEARNING
+# Pulls any custom categories you've ever typed and adds them to the dropdowns!
+sheet_categories = df_exp["Category"].dropna().unique().tolist() if not df_exp.empty else []
+combined_cats = sorted(list(set(default_categories + sheet_categories)))
+
 # --- 4. SECTION: ADD NEW EXPENSE ---
 with st.expander("➕ Log New Expense", expanded=False):
-    with st.form("australia_tracker_form_v7", clear_on_submit=True):
+    with st.form("australia_tracker_form_v8", clear_on_submit=True):
         f_date = st.date_input("Date", datetime.date.today())
-        f_cat = st.selectbox("Category", categories)
+        
+        # 🔴 New Layout: Dropdown + Custom Text Override
+        cat_col1, cat_col2 = st.columns(2)
+        f_cat_sel = cat_col1.selectbox("Select Category", combined_cats)
+        f_cat_custom = cat_col2.text_input("Or Type New Category", placeholder="Overrides selection")
+        
         f_item = st.text_input("Item / Description", placeholder="e.g., Dinner at Sydney Tower")
         
         c1, c2 = st.columns(2)
@@ -60,8 +69,11 @@ with st.expander("➕ Log New Expense", expanded=False):
         
         if st.form_submit_button("💾 Save Expense", use_container_width=True):
             if f_item and f_cost > 0:
+                # Decide which category to use (Custom wins if filled)
+                final_cat = f_cat_custom.strip() if f_cat_custom.strip() else f_cat_sel
+                
                 new_row = pd.DataFrame([{
-                    "Date": str(f_date), "Category": f_cat, "Item": f_item,
+                    "Date": str(f_date), "Category": final_cat, "Item": f_item,
                     "Currency": f_curr, "Cost": f_cost, "Paid By": f_paid,
                     "Split By": f_split, "Remark": f_remark, "Settled": False
                 }])
@@ -101,7 +113,8 @@ with st.expander("🔍 Search & Filter Tools", expanded=False):
     s_query = st.text_input("Search by Item Name", placeholder="Type keywords...")
     f1, f2 = st.columns(2)
     s_payer = f1.multiselect("Filter by Payer", options=trip_users, default=[])
-    s_cat = f2.multiselect("Filter by Category", options=categories, default=[])
+    # Now filters using dynamic learned categories!
+    s_cat = f2.multiselect("Filter by Category", options=combined_cats, default=[])
     s_sort = st.selectbox("Sort Order", ["Date (Newest First)", "Date (Oldest First)", "Cost (Highest First)", "Cost (Lowest First)"])
 
 show_settled = st.checkbox("Show Settled Expenses", value=False)
@@ -125,13 +138,16 @@ else:
             with st.container(border=True):
                 st.write(f"✏️ **Editing:** {row['Item']}")
                 with st.form(key=f"edit_form_{idx}"):
-                    try:
-                        e_date = pd.to_datetime(row['Date']).date()
-                    except:
-                        e_date = datetime.date.today()
+                    try: e_date = pd.to_datetime(row['Date']).date()
+                    except: e_date = datetime.date.today()
                         
                     e_date_input = st.date_input("Date", e_date)
-                    e_cat = st.selectbox("Category", categories, index=safe_index(categories, row['Category']))
+                    
+                    # Edit mode custom category override
+                    ecat1, ecat2 = st.columns(2)
+                    e_cat_sel = ecat1.selectbox("Category", combined_cats, index=safe_index(combined_cats, row['Category']))
+                    e_cat_custom = ecat2.text_input("Or Type New Category", placeholder="Overrides selection")
+                    
                     e_item = st.text_input("Item", row['Item'])
                     
                     ec1, ec2 = st.columns(2)
@@ -146,8 +162,11 @@ else:
                     
                     sc1, sc2 = st.columns(2)
                     if sc1.form_submit_button("💾 Save Changes", use_container_width=True):
+                        # Decide category
+                        final_e_cat = e_cat_custom.strip() if e_cat_custom.strip() else e_cat_sel
+                        
                         df_exp.loc[idx, "Date"] = str(e_date_input)
-                        df_exp.loc[idx, "Category"] = e_cat
+                        df_exp.loc[idx, "Category"] = final_e_cat
                         df_exp.loc[idx, "Item"] = e_item
                         df_exp.loc[idx, "Currency"] = e_curr
                         df_exp.loc[idx, "Cost"] = e_cost
@@ -178,7 +197,6 @@ else:
                         
                     st.write(f"💳 Paid by **{row['Paid By']}** | Split: **{row['Split By']}**")
                     
-                    # 🔴 Show "nothing yet..." if remark is blank
                     display_remark = row['Remark'] if str(row['Remark']).strip() else "nothing yet..."
                     st.caption(f"📝 {display_remark}")
                 
@@ -206,7 +224,6 @@ if active_calc_df.empty:
 else:
     total_trip = active_calc_df["Converted_Cost"].sum()
     
-    # Pre-calculate each person's exact true share (broken down by category for the pie chart)
     pie_data = []
     for _, row in active_calc_df.iterrows():
         amt = row["Converted_Cost"]
@@ -232,11 +249,9 @@ else:
     m1, m2 = st.columns(2)
     m1.metric(f"Unsettled Total ({display_currency})", f"${total_trip:,.2f}")
     
-    # 🔴 "Everyone" added to the dropdown options
     view_options = ["Everyone"] + trip_users
     selected_view_user = m2.selectbox("👀 View Personal Total Expense:", view_options)
     
-    # Filter the data and chart based on the selected user
     if selected_view_user == "Everyone":
         display_total = total_trip
         cat_chart_data = active_calc_df.groupby("Category")["Converted_Cost"].sum().reset_index()
@@ -255,7 +270,6 @@ else:
     st.write(f"#### 🍩 Spending Breakdown ({selected_view_user})")
     
     if not cat_chart_data.empty and display_total > 0:
-        # 🔴 Added a much more colorful and vibrant color palette
         fig = px.pie(
             cat_chart_data, 
             values="Amount", 
