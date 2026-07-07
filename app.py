@@ -98,14 +98,20 @@ else:
                 if row['Remark']:
                     st.caption(f"📝 {row['Remark']}")
             
-           with col2:
+            with col2:
                 button_label = "🔄" if show_settled else "✅"
                 button_help = "Mark as Unsettled" if show_settled else "Mark as Settled"
                 
-                # 📜 HERE IS THE FULL FIXED LINE 105:
                 if st.button(button_label, key=f"settle_{idx}", help=button_help):
                     df_exp.loc[idx, "Settled"] = not show_settled
                     conn.update(spreadsheet=url, data=df_exp, worksheet="Expenses")
+                    st.cache_data.clear()
+                    time.sleep(0.5)
+                    st.rerun()
+                
+                if st.button("🗑️", key=f"del_{idx}", help="Delete Entry"):
+                    cleaned_df = df_exp.drop(index=idx)
+                    conn.update(spreadsheet=url, data=cleaned_df, worksheet="Expenses")
                     st.cache_data.clear()
                     time.sleep(0.5)
                     st.rerun()
