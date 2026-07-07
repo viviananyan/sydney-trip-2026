@@ -10,12 +10,12 @@ st.title("💰 Australia 2026 Expense Tracker")
 
 # --- 2. GOOGLE SHEETS CONNECTION ---
 # 🔴 REPLACE THIS WITH YOUR REAL GOOGLE SHEET URL:
-url = "https://docs.google.com/spreadsheets/d/17vTlewfPPS2lZainhCJgEEOkp5tJ3LDNqX8myrfJ7uQ/edit?gid=743694833#gid=743694833"
+url = "https://docs.google.com/spreadsheets/d/your_actual_sheet_id_letters_and_numbers/edit"
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Define your trip members here
-trip_users = ["UserA", "UserB", "UserC"] 
+# 🐶🍔🦕 Updated Personalized Names:
+trip_users = ["Suri🐶", "Bobo🍔", "Sally🦕"] 
 
 # --- 3. DATA LOADING & SANITIZATION ---
 try:
@@ -36,7 +36,8 @@ except Exception as e:
 
 # --- 4. SECTION: ADD NEW EXPENSE ---
 with st.expander("➕ Log New Expense", expanded=False):
-    with st.form("expense_form", clear_on_submit=True):
+    # 🛠️ FIXED: Changed form key to "main_expense_creation_form" to eliminate duplicate key error
+    with st.form("main_expense_creation_form", clear_on_submit=True):
         f_date = st.date_input("Date", datetime.date.today())
         f_cat = st.selectbox("Category", ["Food", "Transport", "Shopping", "Entertainment", "Stay", "Flights", "Other"])
         f_item = st.text_input("Item / Description", placeholder="e.g., Dinner at Sydney Tower")
@@ -64,9 +65,7 @@ with st.expander("➕ Log New Expense", expanded=False):
                 st.rerun()
             else:
                 st.error("Please enter both an item description and an amount.")
-
-st.divider()
-
+                
 # --- 5. GLOBAL EXCHANGE RATE CONFIGURATION ---
 st.sidebar.header("💱 Exchange Settings")
 ex_rate = st.sidebar.number_input("1 AUD to HKD Rate", min_value=1.0, value=5.15, step=0.01, help="Used for unified analytics calculations.")
