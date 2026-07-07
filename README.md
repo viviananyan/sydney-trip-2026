@@ -1,1 +1,1 @@
-# sydney-trip-2026
+# aus-trip-2026
