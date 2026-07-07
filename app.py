@@ -1,17 +1,14 @@
-import streamlit as pd
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import datetime
 
 # --- APP CONFIGURATION ---
-st.set_page_config(page_title="Sydney 2026 Expense Tracker", page_icon="💰", layout="centered")
-st.title("💰 Sydney 2026 Expense Tracker")
+st.set_page_config(page_title="Aus 2026 Expense Tracker", page_icon="💰", layout="centered")
+st.title("💰 Aus 2026 Expense Tracker")
 
-# --- GOOGLE SHEETS CONNECTION ---
-# Replace with your actual Google Sheet URL
-url = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID_HERE/edit"
-conn = st.connection("gsheets", type=GSheetsConnection)
+# 🔴 PUT YOUR ACTUAL URL HERE:
+url = "https://docs.google.com/spreadsheets/d/17vTlewfPPS2lZainhCJgEEOkp5tJ3LDNqX8myrfJ7uQ/edit?gid=743694833#gid=743694833"
 
 # Define your trip members here
 trip_users = ["UserA", "UserB", "UserC"] 
