@@ -5,12 +5,12 @@ import datetime
 import time
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Sydney 2026 Expense Tracker", page_icon="💰", layout="centered")
-st.title("💰 Sydney 2026 Expense Tracker")
+st.set_page_config(page_title="Australia 2026 Expense Tracker", page_icon="💰", layout="centered")
+st.title("💰 Australia 2026 Expense Tracker")
 
 # --- 2. GOOGLE SHEETS CONNECTION ---
 # 🔴 REPLACE THIS WITH YOUR REAL GOOGLE SHEET URL:
-url = "https://docs.google.com/spreadsheets/d/your_actual_sheet_id_letters_and_numbers/edit"
+url = "https://docs.google.com/spreadsheets/d/17vTlewfPPS2lZainhCJgEEOkp5tJ3LDNqX8myrfJ7uQ/edit?gid=743694833#gid=743694833"
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
