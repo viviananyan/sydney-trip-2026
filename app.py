@@ -9,16 +9,17 @@ st.set_page_config(page_title="Australia 2026 Expense Tracker", page_icon="💰"
 st.title("💰 Australia 2026 Expense Tracker")
 
 # --- 2. GOOGLE SHEETS CONNECTION ---
-# 🔴 REPLACE THIS WITH YOUR REAL GOOGLE SHEET URL:
-url = "https://docs.google.com/spreadsheets/d/your_actual_sheet_id_letters_and_numbers/edit"
+# Updated with your exact spreadsheet link
+url = "https://docs.google.com/spreadsheets/d/17vTlewfPPS2lZainhCJgEEOkp5tJ3LDNqX8myrfJ7uQ/edit#gid=743694833"
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# 🐶🍔🦕 Updated Personalized Names:
+# Your personalized squad names matching your spreadsheet exactly
 trip_users = ["Suri🐶", "Bobo🍔", "Sally🦕"] 
 
 # --- 3. DATA LOADING & SANITIZATION ---
 try:
+    # Read specifically from the 'Expenses' worksheet
     df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=5)
     
     required_cols = ["Date", "Category", "Item", "Currency", "Cost", "Paid By", "Split By", "Remark", "Settled"]
@@ -35,6 +36,44 @@ except Exception as e:
     st.stop()
 
 # --- 4. SECTION: ADD NEW EXPENSE ---
+with st.expander("➕ Log New Expense", expanded=False):
+    # Isolated form key to bypass Streamlit's background cache locks
+    with st.form("australia_final_ledger_form_2026", clear_on_submit=True):
+        f_date = st.date_input("Date", datetime.date.today())
+        f_cat = st.selectbox("Category", ["Food", "Transport", "Shopping", "Entertainment", "Stay", "Flights", "Other"])
+        f_item = st.text_input("Item / Description", placeholder="e.g., Dinner at Sydney Tower")
+        
+        c1, c2 = st.columns(2)
+        f_curr = c1.selectbox("Currency", ["AUD", "HKD"])
+        f_cost = c2.number_input("Amount", min_value=0.0, step=0.01, format="%.2f")
+        
+        f_paid = st.selectbox("Paid By", trip_users)
+        f_split = st.selectbox("Split With", ["All"] + trip_users)
+        f_remark = st.text_input("Remarks / Notes")
+        
+        if st.form_submit_button("💾 Save Expense", use_container_width=True):
+            if f_item and f_cost > 0:
+                new_row = pd.DataFrame([{
+                    "Date": str(f_date), "Category": f_cat, "Item": f_item,
+                    "Currency": f_curr, "Cost": f_cost, "Paid By": f_paid,
+                    "Split By": f_split, "Remark": f_remark, "Settled": False
+                }])
+                updated_df = pd.concat([df_exp, new_row], ignore_index=True)
+                conn.update(spreadsheet=url, data=updated_df, worksheet="Expenses")
+                st.success(f"Added {f_item} ({f_curr} {f_cost:.2f})!")
+                st.cache_data.clear()
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("Please enter both an item description and an amount.")
+
+st.divider()
+
+# --- 5. GLOBAL EXCHANGE RATE CONFIGURATION ---
+st.sidebar.header("💱 Exchange Settings")
+ex_rate = st.sidebar.number_input("1 AUD to HKD Rate", min_value=1.0, value=5.15, step=0.01, help="Used for unified analytics calculations.")
+
+# Helper function to# --- 4. SECTION: ADD NEW EXPENSE ---
 with st.expander("➕ Log New Expense", expanded=False):
     # 🛠️ FIXED: Changed form key to "main_expense_creation_form" to eliminate duplicate key error
     with st.form("main_expense_creation_form", clear_on_submit=True):
