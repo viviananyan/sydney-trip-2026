@@ -133,9 +133,22 @@ else:
             
             with col2:
                 button_label = "🔄" if show_settled else "✅"
-                if st.button(button_    st.error(f"Error loading Expenses tab: {e}")
-    st.stop()
-
+                
+                # 🛠️ Fixed Line 136: Clean and separated from the data loader error!
+                if st.button(button_label, key=f"settle_{idx}", help="Toggle status"):
+                    df_exp.loc[idx, "Settled"] = not show_settled
+                    conn.update(spreadsheet=url, data=df_exp, worksheet="Expenses")
+                    st.cache_data.clear()
+                    time.sleep(0.5)
+                    st.rerun()
+                
+                if st.button("🗑️", key=f"del_{idx}", help="Delete Entry"):
+                    cleaned_df = df_exp.drop(index=idx)
+                    conn.update(spreadsheet=url, data=cleaned_df, worksheet="Expenses")
+                    st.cache_data.clear()
+                    time.sleep(0.5)
+                    st.rerun()
+                    
 # --- 4. SECTION: ADD NEW EXPENSE ---
 with st.expander("➕ Log New Expense", expanded=True):
     with st.form("expense_form", clear_on_submit=True):
