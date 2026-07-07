@@ -6,3 +6,4 @@ streamlit-folium
 geopy
 plotly
 google-generativeai
+plotly==5.24.1
