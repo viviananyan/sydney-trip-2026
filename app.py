@@ -2,19 +2,25 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import datetime
+import time
 
-# --- APP CONFIGURATION ---
+# --- 1. APP CONFIGURATION ---
 st.set_page_config(page_title="Aus 2026 Expense Tracker", page_icon="💰", layout="centered")
 st.title("💰 Aus 2026 Expense Tracker")
 
-# 🔴 PUT YOUR ACTUAL URL HERE:
-url = "https://docs.google.com/spreadsheets/d/17vTlewfPPS2lZainhCJgEEOkp5tJ3LDNqX8myrfJ7uQ/edit?gid=743694833#gid=743694833"
+# --- 2. GOOGLE SHEETS CONNECTION ---
+# 🔴 REPLACE THIS WITH YOUR REAL GOOGLE SHEET URL:
+url = "https://docs.google.com/spreadsheets/d/your_actual_sheet_id_letters_and_numbers/edit"
+
+# Initialize the connection (This defines 'conn' so Python knows what it is!)
+conn = st.connection("gsheets", type=GSheetsConnection)
 
 # Define your trip members here
 trip_users = ["UserA", "UserB", "UserC"] 
 
-# --- DATA LOADING (With 5-second safety buffer for rate limits) ---
+# --- 3. DATA LOADING ---
 try:
+    # Read the data using the defined connection
     df_exp = conn.read(spreadsheet=url, worksheet="Expenses", ttl=5)
     
     # Ensure required columns exist
@@ -31,9 +37,7 @@ except Exception as e:
     st.error(f"Error loading Expenses tab: {e}")
     st.stop()
 
-# ==============================================================================
-# --- SECTION 1: ADD NEW EXPENSE ---
-# ==============================================================================
+# --- 4. SECTION: ADD NEW EXPENSE ---
 with st.expander("➕ Log New Expense", expanded=True):
     with st.form("expense_form", clear_on_submit=True):
         f_date = st.date_input("Date", datetime.date.today())
@@ -50,7 +54,6 @@ with st.expander("➕ Log New Expense", expanded=True):
         
         if st.form_submit_button("💾 Save Expense", use_container_width=True):
             if f_item and f_cost > 0:
-                # Build the new row matching your sheet's column schema
                 new_row = pd.DataFrame([{
                     "Date": str(f_date),
                     "Category": f_cat,
@@ -63,32 +66,27 @@ with st.expander("➕ Log New Expense", expanded=True):
                     "Settled": False
                 }])
                 
-                # Append and write to Google Sheets
                 updated_df = pd.concat([df_exp, new_row], ignore_index=True)
                 conn.update(spreadsheet=url, data=updated_df, worksheet="Expenses")
                 
                 st.success(f"Added {f_item} (${f_cost} {f_curr})!")
                 st.cache_data.clear()
-                import time; time.sleep(1)
+                time.sleep(1)
                 st.rerun()
             else:
                 st.error("Please enter both an item description and an amount.")
 
 st.divider()
 
-# ==============================================================================
-# --- SECTION 2: THE LEDGER & SETTLEMENTS ---
-# ==============================================================================
+# --- 5. SECTION: THE LEDGER & SETTLEMENTS ---
 st.subheader("📊 Active Ledger")
 
-# Quick Filters
 show_settled = st.checkbox("Show Settled Expenses", value=False)
 view_df = df_exp[df_exp["Settled"] == show_settled]
 
 if view_df.empty:
     st.info("No active expenses found. Keep an eye on your wallet!")
 else:
-    # Display expenses in a mobile-friendly stack view
     for idx, row in view_df.iterrows():
         with st.container(border=True):
             col1, col2 = st.columns([5, 1])
@@ -101,21 +99,7 @@ else:
                     st.caption(f"📝 {row['Remark']}")
             
             with col2:
-                # Settle Button Toggle
                 button_label = "🔄" if show_settled else "✅"
                 button_help = "Mark as Unsettled" if show_settled else "Mark as Settled"
                 
-                if st.button(button_label, key=f"settle_{idx}", help=button_help):
-                    df_exp.loc[idx, "Settled"] = not show_settled
-                    conn.update(spreadsheet=url, data=df_exp, worksheet="Expenses")
-                    st.cache_data.clear()
-                    import time; time.sleep(0.5)
-                    st.rerun()
-                
-                # Delete Button
-                if st.button("🗑️", key=f"del_{idx}", help="Delete Entry"):
-                    cleaned_df = df_exp.drop(index=idx)
-                    conn.update(spreadsheet=url, data=cleaned_df, worksheet="Expenses")
-                    st.cache_data.clear()
-                    import time; time.sleep(0.5)
-                    st.rerun()
+                if st.button(button_label, key
