@@ -3,6 +3,7 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import datetime
 import time
+import plotly.express as px  # 🍩 NEW: Added Plotly for the pie chart!
 
 # --- 1. APP CONFIGURATION ---
 st.set_page_config(page_title="Australia 2026 Expense Tracker", page_icon="💰", layout="centered")
@@ -34,7 +35,7 @@ except Exception as e:
 
 # --- 4. SECTION: ADD NEW EXPENSE ---
 with st.expander("➕ Log New Expense", expanded=False):
-    with st.form("australia_tracker_form_v5", clear_on_submit=True):
+    with st.form("australia_tracker_form_pie_edition", clear_on_submit=True):
         f_date = st.date_input("Date", datetime.date.today())
         f_cat = st.selectbox("Category", ["Food", "Transport", "Shopping", "Entertainment", "Stay", "Flights", "Other"])
         f_item = st.text_input("Item / Description", placeholder="e.g., Dinner at Sydney Tower")
@@ -78,7 +79,6 @@ ex_rate = st.sidebar.number_input(
     help="Used to normalize all calculation values."
 )
 
-# Dynamic conversion function based on the toggle!
 def convert_cost(row):
     if display_currency == "HKD":
         return row["Cost"] * ex_rate if row["Currency"] == "AUD" else row["Cost"]
@@ -131,7 +131,6 @@ else:
                 st.markdown(f"#### {row['Item']}")
                 st.caption(f"📅 {row['Date']} | 📂 {row['Category']}")
                 
-                # Shows the toggle currency clearly, and keeps the original underneath if it's different
                 st.write(f"💰 **{display_currency} {row['Converted_Cost']:.2f}**")
                 if row['Currency'] != display_currency:
                     st.caption(f"*(Original receipt: {row['Currency']} {row['Cost']:.2f})*")
@@ -173,10 +172,18 @@ else:
     m2.metric(f"Per Person Share", f"${(total_trip / len(trip_users)):,.2f}")
     
     st.write(f"#### 🍩 Spending by Category ({display_currency})")
-    cat_chart_data = active_calc_df.groupby("Category")["Converted_Cost"].sum().reset_index()
-    st.bar_chart(data=cat_chart_data, x="Category", y="Converted_Cost", color="Category", use_container_width=True)
     
-    # 🔴 Renamed requested section
+    # 🥧 THE NEW PIE CHART CODE 🥧
+    cat_chart_data = active_calc_df.groupby("Category")["Converted_Cost"].sum().reset_index()
+    fig = px.pie(
+        cat_chart_data, 
+        values="Converted_Cost", 
+        names="Category",
+        hole=0.4 # Makes it look like a donut! Set to 0 for a solid pie.
+    )
+    fig.update_layout(margin=dict(t=0, b=0, l=0, r=0)) # Removes extra whitespace padding
+    st.plotly_chart(fig, use_container_width=True)
+    
     st.write("#### Who pays who?💸")
     
     balances = {user: 0.0 for user in trip_users}
@@ -213,7 +220,6 @@ else:
         creditor_name, creditor_bal = creditors[0]
         
         amount_to_pay = min(abs(debtor_bal), creditor_bal)
-        # 🔴 Now prints in the selected toggle currency
         transactions.append(f"👉 **{debtor_name}** pays **{creditor_name}**: **{display_currency} {amount_to_pay:.2f}**")
         
         debtors[0][1] += amount_to_pay
